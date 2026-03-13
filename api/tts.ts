@@ -1,54 +1,26 @@
-const DEFAULT_ELEVENLABS_VOICE_ID = 'jdlxsPOZOHdGEfcItXVu';
-const ELEVENLABS_MODEL_ID = 'eleven_multilingual_v2';
-const ELEVENLABS_OUTPUT_FORMAT = 'mp3_44100_128';
 const GOOGLE_TTS_MAX_CHARS = 180;
 
 interface TtsBody {
   text?: string;
-  voiceId?: string;
+  language?: string;
 }
 
 const toArrayBuffer = async (response: Response): Promise<ArrayBuffer> => response.arrayBuffer();
 
-const requestElevenLabs = async ({
-  apiKey,
+const requestGoogleTranslateTts = async ({
   text,
-  voiceId,
+  language,
   signal,
 }: {
-  apiKey: string;
   text: string;
-  voiceId: string;
+  language: string;
   signal: AbortSignal;
 }): Promise<Response> => {
-  return fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
-    method: 'POST',
-    headers: {
-      'xi-api-key': apiKey,
-      'Content-Type': 'application/json',
-      Accept: 'audio/mpeg',
-    },
-    body: JSON.stringify({
-      model_id: ELEVENLABS_MODEL_ID,
-      output_format: ELEVENLABS_OUTPUT_FORMAT,
-      text,
-      voice_settings: {
-        stability: 0.45,
-        similarity_boost: 0.85,
-        style: 0.35,
-        use_speaker_boost: true,
-      },
-    }),
-    signal,
-  });
-};
-
-const requestGoogleTranslateTts = async ({ text, signal }: { text: string; signal: AbortSignal }): Promise<Response> => {
   const clippedText = text.slice(0, GOOGLE_TTS_MAX_CHARS);
   const params = new URLSearchParams({
     ie: 'UTF-8',
     client: 'tw-ob',
-    tl: 'vi',
+    tl: language,
     q: clippedText,
   });
 
@@ -67,6 +39,8 @@ export default async function handler(req: any, res: any) {
 
   const body = (req.body || {}) as TtsBody;
   const text = body?.text;
+  const language = body?.language?.trim() || 'vi';
+
   if (!text || typeof text !== 'string') {
     res.status(400).json({ error: 'text is required' });
     return;
@@ -82,6 +56,23 @@ export default async function handler(req: any, res: any) {
   const timeout = setTimeout(() => controller.abort('TTS timeout'), 45000);
 
   try {
+    const response = await requestGoogleTranslateTts({
+      text,
+      language,
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      res.status(502).json({ error: `Google TTS failed (${response.status}): ${errText}` });
+      return;
+    }
+
+    const arrayBuffer = await toArrayBuffer(response);
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-TTS-Provider', 'google-translate');
+    res.status(200).send(Buffer.from(arrayBuffer));
     const apiKey = process.env.ELEVENLABS_API_KEY;
     const errors: string[] = [];
 
