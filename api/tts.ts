@@ -72,12 +72,6 @@ export default async function handler(req: any, res: any) {
     return;
   }
 
-  const apiKey = process.env.ELEVENLABS_API_KEY;
-  if (!apiKey) {
-    res.status(500).json({ error: 'Missing ELEVENLABS_API_KEY' });
-    return;
-  }
-
   const envVoiceId = process.env.ELEVENLABS_VOICE_ID?.trim();
   const requestedVoiceId = body.voiceId?.trim();
   const voiceCandidates = Array.from(
@@ -87,38 +81,8 @@ export default async function handler(req: any, res: any) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort('TTS timeout'), 45000);
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort('TTS timeout'), 45000);
-
   try {
-    let lastError = 'Unknown ElevenLabs error';
-
-    for (const voiceId of voiceCandidates) {
-      const response = await requestElevenLabs({
-        apiKey,
-        text,
-        voiceId,
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        const errText = await response.text();
-        lastError = `voice=${voiceId}, status=${response.status}, error=${errText}`;
-        continue;
-      }
-
-      const arrayBuffer = await response.arrayBuffer();
-      res.setHeader('Content-Type', 'audio/mpeg');
-      res.setHeader('Cache-Control', 'no-store');
-      res.setHeader('X-TTS-Provider', 'elevenlabs-server');
-      res.setHeader('X-ElevenLabs-Voice-Id', voiceId);
     const apiKey = process.env.ELEVENLABS_API_KEY;
-    const envVoiceId = process.env.ELEVENLABS_VOICE_ID?.trim();
-    const requestedVoiceId = body.voiceId?.trim();
-    const voiceCandidates = Array.from(
-      new Set([requestedVoiceId, envVoiceId, DEFAULT_ELEVENLABS_VOICE_ID].filter(Boolean) as string[]),
-    );
-
     const errors: string[] = [];
 
     if (apiKey) {
@@ -148,7 +112,6 @@ export default async function handler(req: any, res: any) {
       errors.push('elevenlabs missing ELEVENLABS_API_KEY');
     }
 
-    // Fallback miễn phí, không dùng Web Speech
     const freeTtsResponse = await requestGoogleTranslateTts({ text, signal: controller.signal });
     if (freeTtsResponse.ok) {
       const arrayBuffer = await toArrayBuffer(freeTtsResponse);
@@ -159,7 +122,6 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    res.status(502).json({ error: `ElevenLabs error: ${lastError}` });
     const freeTtsError = await freeTtsResponse.text();
     errors.push(`google-translate status=${freeTtsResponse.status} ${freeTtsError}`);
     res.status(502).json({ error: `All TTS providers failed: ${errors.join(' | ')}` });
