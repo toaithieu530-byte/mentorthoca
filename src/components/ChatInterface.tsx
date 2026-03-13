@@ -471,6 +471,23 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
       console.warn('Puter TTS unavailable:', error);
       task.isFailed = true;
       setTtsError('Không phát được âm thanh Puter TTS lúc này. Bạn vẫn có thể tiếp tục chat bình thường.');
+    } catch (error: any) {
+      console.warn('Server ElevenLabs TTS unavailable, trying Puter ElevenLabs:', error);
+      try {
+        const puterPlay = await createPuterElevenLabsPlayer(task.text);
+        if (!puterPlay) {
+          throw new Error('Puter ElevenLabs is unavailable in this browser');
+        }
+
+        task.puterPlay = puterPlay;
+        task.base64Audio = 'puter-elevenlabs';
+        task.isReady = true;
+        setTtsError(null);
+      } catch (puterError) {
+        console.warn('Puter ElevenLabs TTS unavailable:', puterError);
+        task.isFailed = true;
+        setTtsError('Không phát được audio: ElevenLabs server và Puter ElevenLabs đều đang lỗi.');
+      }
     } finally {
       task.isFetching = false;
       playNextAudio();
@@ -528,6 +545,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
           id: 'system-reading',
           role: 'model',
           text: '*Đang đọc đoạn thơ bằng giọng Puter TTS (tiếng Việt)...*',
+          text: '*Đang đọc đoạn thơ bằng giọng ElevenLabs (server/Puter)...*',
         }]);
 
         setPlayingAudioId('system-reading');
