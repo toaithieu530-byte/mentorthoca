@@ -492,10 +492,6 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
         task.isFailed = true;
         setTtsError('Không phát được audio: ElevenLabs server và Puter ElevenLabs đều đang lỗi.');
       }
-      console.warn('ElevenLabs TTS unavailable:', error);
-      task.isFailed = true;
-      setTtsError('TTS đang lỗi ở cả ElevenLabs và fallback miễn phí, nên tạm thời chưa phát được âm thanh.');
-      setTtsError('Giọng ElevenLabs đang lỗi hoặc thiếu API key, nên tạm thời không phát được âm thanh.');
     } finally {
       task.isFetching = false;
       playNextAudio();
@@ -553,7 +549,6 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
           id: 'system-reading',
           role: 'model',
           text: '*Đang đọc đoạn thơ bằng giọng ElevenLabs (server/Puter)...*',
-          text: '*Đang đọc đoạn thơ bằng giọng ElevenLabs...*',
         }]);
 
         setPlayingAudioId('system-reading');
