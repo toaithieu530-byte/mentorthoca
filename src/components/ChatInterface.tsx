@@ -4,50 +4,58 @@ import { Send, Volume2, Loader2, ArrowLeft, User, Sparkles, BookOpen, X, Feather
 import { motion, AnimatePresence } from 'motion/react';
 import { callPuterGemini, isPuterAvailable, streamPuterGemini } from '../lib/puter';
 
-const SYSTEM_PROMPT = `Định vị: Bạn là "Mentor Thẩm mĩ Thơ ca", một chuyên gia Văn học và là người dẫn dắt đầy tính sư phạm. Nhiệm vụ của bạn là hướng dẫn học sinh cấp 3 phát hiện và giải mã tín hiệu thẩm mĩ trong thơ hiện đại dựa trên phương pháp tri giác và tư duy ngôn ngữ nghệ thuật.
+const SYSTEM_PROMPT = `VAI TRÒ: Bạn là "Mentor Thẩm mĩ Thơ ca" hướng dẫn học sinh cấp 3 phân tích thơ hiện đại theo từng bước sư phạm.
 
-Nguyên tắc tối thượng:
-1. KHÔNG BAO GIỜ làm bài hộ trọn vẹn, nhưng vẫn phải giảng đủ sâu để học sinh hiểu bản chất nghệ thuật.
-2. KHÔNG BAO GIỜ đưa ra gợi ý hay đáp án trước khi học sinh trả lời.
-3. LUÔN LUÔN ĐẶT CÂU HỎI VÀ DỪNG LẠI CHỜ HỌC SINH TRẢ LỜI. Mỗi phản hồi nên gồm 5-8 câu: 2-3 câu gợi mở, 2-3 câu giảng ngắn, và 1 câu hỏi tiếp theo.
-4. LUÔN KHUYẾN KHÍCH học sinh huy động vốn sống, vốn hiểu biết thực tế và trí tưởng tượng để đối chiếu với các tín hiệu trong thơ.
+MỤC TIÊU PHẢN HỒI:
+- Luôn giúp học sinh tự nghĩ ra đáp án trước, không làm hộ ngay.
+- Luôn chấm mức độ đúng/sai/thiếu của câu trả lời học sinh.
+- Nếu học sinh sai hoặc thiếu: gợi ý tăng dần tối đa 3 lượt. Sau lượt thứ 3 vẫn chưa đạt thì mới đưa đáp án mẫu ngắn gọn.
 
-CÔNG CỤ TƯƠNG TÁC (Đặt ở cuối câu trả lời):
-- [RHYTHM: dòng 1 / ngắt nhịp, dòng 2 / ngắt nhịp]: Chỉ dùng khi xác nhận nhịp điệu học sinh nêu.
-- [HIGHLIGHT: từ 1, từ 2]: Chỉ dùng khi xác nhận tín hiệu thẩm mĩ học sinh đã chọn.
-- [CLEAR_MARKUP]: Xóa hiệu ứng cũ.
-- [SUMMARY_MODE]: Kích hoạt giao diện tổng kết ở Bước 5.
+QUY TẮC BẮT BUỘC VỀ ĐỊNH DẠNG (mọi phản hồi):
+1) Dòng đầu tiên luôn là tiêu đề bước: "### BƯỚC X: ...".
+2) Tiếp theo là mục "ĐÁNH GIÁ" (đúng/sai/thiếu + vì sao).
+3) Tiếp theo là mục "GỢI Ý" (nếu cần).
+4) Cuối cùng luôn có dòng: "🔴 **CÂU HỎI TRỌNG TÂM:** ...".
+5) Câu hỏi trọng tâm phải chỉ có 1 câu hỏi chính, ngắn, rõ, dễ trả lời.
 
-LUỒNG XỬ LÝ THEO TÀI LIỆU HƯỚNG DẪN:
+THANG ĐÁNH GIÁ CÂU TRẢ LỜI HỌC SINH:
+- ĐÚNG: nêu được ý cốt lõi + có bằng chứng từ ngữ/hình ảnh thơ.
+- THIẾU: đúng hướng nhưng thiếu ví dụ, thiếu tín hiệu thẩm mĩ, hoặc xếp loại chưa đủ nhóm.
+- SAI: lệch nghĩa văn bản hoặc không bám câu chữ.
 
-BƯỚC 1: TRI GIÁC ĐOẠN THƠ (Perception)
-- Mục tiêu: Tái hiện hình tượng thơ qua giọng điệu và nhịp điệu.
-- AI nhận định nhanh về giọng điệu chính (hào hùng, trầm lắng, thiết tha...).
-- Câu hỏi gợi mở: "Để nhập vai vào chủ thể trữ tình trong đoạn thơ này, bạn nghĩ chúng ta nên ngắt nhịp thế nào và đọc với giọng điệu ra sao để bộc lộ đúng nỗi niềm của tác giả?"
--> DỪNG LẠI CHỜ.
+CƠ CHẾ GỢI Ý 3 LẦN:
+- Lần 1: gợi ý định hướng rất nhẹ (không lộ đáp án).
+- Lần 2: gợi ý cụ thể hơn, khoanh vùng từ khóa/câu thơ.
+- Lần 3: gợi ý gần đáp án (khung trả lời).
+- Sau 3 lần chưa đạt: đưa đáp án mẫu ngắn + giải thích vì sao.
 
-BƯỚC 2: XÁC ĐỊNH TÍN HIỆU THẨM MĨ (Identification)
-- Mục tiêu: Phân biệt kí hiệu ngôn ngữ thông thường và tín hiệu thẩm mĩ (đa nghĩa, gợi hình, gợi cảm).
-- AI yêu cầu học sinh nhặt ra các từ/cụm từ "lạ", "đặc biệt" hoặc "có sức gợi" nhất.
-- Gợi ý: "Hãy tìm những điểm sáng ngôn từ mà bạn thấy không thể thay thế bằng từ khác được."
--> DỪNG LẠI CHỜ.
+CÔNG CỤ TƯƠNG TÁC (đặt cuối khi phù hợp):
+- [RHYTHM: dòng 1 / ngắt nhịp, dòng 2 / ngắt nhịp]
+- [HIGHLIGHT: từ 1, từ 2]
+- [CLEAR_MARKUP]
+- [SUMMARY_MODE]
 
-BƯỚC 3: PHÂN DẠNG TÍN HIỆU (Classification)
-- AI hướng dẫn học sinh xếp các tín hiệu đã tìm được vào 4 nhóm chuẩn:
-  1. Đặc trưng thể loại (Thể thơ, vần, nhịp).
-  2. Từ ngữ đặc biệt (Từ tượng hình/thanh, từ được cắt nghĩa mới, từ mô tả trạng thái).
-  3. Biện pháp tu từ (So sánh, ẩn dụ, hoán dụ, điệp...).
-  4. Cấu trúc cú pháp (Đảo ngữ, đối, kết hợp từ lạ).
--> DỪNG LẠI CHỜ.
+QUY TẮC KÍCH HOẠT TƯƠNG TÁC TRÊN VĂN BẢN THƠ (BẮT BUỘC):
+- Khi học sinh trả lời ĐÚNG về nhịp: bắt buộc thêm [RHYTHM: ...] để hiện dấu ngắt nhịp trực tiếp trên bài thơ bên trái.
+- Khi học sinh trả lời ĐÚNG về hình ảnh/từ ngữ/tín hiệu thẩm mĩ: bắt buộc thêm [HIGHLIGHT: ...] để tô đậm từ/cụm từ tương ứng.
+- Khi chuyển sang phân tích sâu một từ/hình ảnh cụ thể: bắt buộc thêm [HIGHLIGHT: ...] chứa đúng từ/hình ảnh đang phân tích.
+- Nếu học sinh trả lời sai hoàn toàn, có thể dùng [CLEAR_MARKUP] để xóa đánh dấu cũ trước khi dẫn dắt lại.
 
-BƯỚC 4: GIẢI MÃ TÍN HIỆU (Decoding)
-- Mục tiêu: Đi từ nhận thức cảm tính đến phân tích dụng ý nghệ thuật.
-- Thủ pháp: So sánh tín hiệu thẩm mĩ với từ ngữ thông thường tương đương để thấy sự "phi lý" hoặc "khác thường".
-- Câu hỏi: "Tại sao tác giả lại dùng [Tín hiệu] mà không dùng [Từ thông thường]? Cách nói này giúp bạn liên tưởng đến hình ảnh hay cảm xúc gì trong đời sống thực tế?"
--> DỪNG LẠI CHỜ TỪNG TÍN HIỆU MỘT.
+LUỒNG DẠY HỌC:
+### BƯỚC 1: TRI GIÁC ĐOẠN THƠ
+- Mục tiêu: nhận giọng điệu, nhịp điệu, cảm xúc chủ đạo.
 
-BƯỚC 5: TỔNG KẾT (Summary)
-- Tổng hợp lại thành chỉnh thể nghệ thuật. Bắt buộc dùng thẻ [SUMMARY_MODE] và định dạng JSON như mẫu cũ.`;
+### BƯỚC 2: XÁC ĐỊNH TÍN HIỆU THẨM MĨ
+- Mục tiêu: chọn từ/cụm từ "đắt", đa nghĩa, gợi hình/gợi cảm.
+
+### BƯỚC 3: PHÂN DẠNG TÍN HIỆU
+- Mục tiêu: xếp vào nhóm thể loại, từ ngữ đặc biệt, tu từ, cú pháp.
+
+### BƯỚC 4: GIẢI MÃ TÍN HIỆU
+- Mục tiêu: phân tích dụng ý nghệ thuật, hiệu quả biểu đạt.
+
+### BƯỚC 5: TỔNG KẾT
+- Bắt buộc dùng [SUMMARY_MODE] + JSON tổng kết như schema cũ.`;
 
 async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3, baseDelay = 400): Promise<T> {
   let attempt = 0;
@@ -130,9 +138,7 @@ const TEXT_API_ENDPOINTS = TEXT_API_BASE
     ? ['/api/chat', DEFAULT_TEXT_ENDPOINT]
     : [DEFAULT_TEXT_ENDPOINT, '/api/chat'];
 const TEXT_MODELS = ['openai', 'openai-large'];
-const ELEVENLABS_TTS_ENDPOINT = '/api/tts';
-const ELEVENLABS_VOICE_ID = (import.meta as any).env?.VITE_ELEVENLABS_VOICE_ID as string | undefined;
-const PUTER_ELEVENLABS_VOICE_ID = 'jdlxsPOZOHdGEfcItXVu';
+const PUTER_TTS_LANGUAGE = 'vi-VN';
 const USE_PUTER_GEMINI = (import.meta as any).env?.VITE_USE_PUTER_GEMINI !== 'false';
 
 export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
@@ -267,21 +273,23 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
   };
 
   const parseMarkup = (text: string) => {
-    const rhythmMatch = text.match(/\[RHYTHM:\s*(.*?)\]/);
-    if (rhythmMatch) {
-      const lines = rhythmMatch[1].split(',').map(l => l.trim());
-      setRhythmLines(lines);
-    }
-    
-    const highlightMatch = text.match(/\[HIGHLIGHT:\s*(.*?)\]/);
-    if (highlightMatch) {
-      const words = highlightMatch[1].split(',').map(w => w.trim());
-      setHighlights(words);
-    }
-    
     if (text.includes('[CLEAR_MARKUP]')) {
       setHighlights([]);
       setRhythmLines([]);
+    }
+
+    const rhythmMatches = Array.from(text.matchAll(/\[RHYTHM:\s*(.*?)\]/g));
+    if (rhythmMatches.length > 0) {
+      const lastRhythm = rhythmMatches[rhythmMatches.length - 1]?.[1] || '';
+      const lines = lastRhythm.split(',').map(l => l.trim()).filter(Boolean);
+      setRhythmLines(lines);
+    }
+
+    const highlightMatches = Array.from(text.matchAll(/\[HIGHLIGHT:\s*(.*?)\]/g));
+    if (highlightMatches.length > 0) {
+      const lastHighlight = highlightMatches[highlightMatches.length - 1]?.[1] || '';
+      const words = lastHighlight.split(',').map(w => w.trim()).filter(Boolean);
+      setHighlights(words);
     }
     
     if (text.includes('[SUMMARY_MODE]')) {
@@ -389,16 +397,11 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
   };
 
 
-  const createPuterElevenLabsPlayer = async (text: string): Promise<(() => Promise<void>) | null> => {
+  const createPuterTtsPlayer = async (text: string): Promise<(() => Promise<void>) | null> => {
     const puter = (window as any).puter;
     if (!puter?.ai?.txt2speech) return null;
 
-    const audioLike = await puter.ai.txt2speech(text, {
-      provider: 'elevenlabs',
-      voice: PUTER_ELEVENLABS_VOICE_ID,
-      model: 'eleven_multilingual_v2',
-      output_format: 'mp3_44100_128',
-    });
+    const audioLike = await puter.ai.txt2speech(text, PUTER_TTS_LANGUAGE);
 
     return async () => {
       if (audioLike?.pause) {
@@ -427,7 +430,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
 
         const onError = () => {
           cleanup();
-          reject(new Error('Puter ElevenLabs playback failed'));
+          reject(new Error('Puter TTS playback failed'));
         };
 
         if (typeof audioLike.addEventListener === 'function') {
@@ -455,47 +458,19 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
 
     task.isFetching = true;
     try {
-      const response = await fetch(ELEVENLABS_TTS_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: task.text, voiceId: ELEVENLABS_VOICE_ID }),
-      });
-
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`ElevenLabs TTS failed (${response.status}): ${errText}`);
+      const puterPlay = await createPuterTtsPlayer(task.text);
+      if (!puterPlay) {
+        throw new Error('Puter TTS is unavailable in this browser');
       }
 
-      const buffer = await response.arrayBuffer();
-      let binary = '';
-      const bytes = new Uint8Array(buffer);
-      const chunkSize = 0x8000;
-      for (let i = 0; i < bytes.length; i += chunkSize) {
-        binary += String.fromCharCode(...bytes.slice(i, i + chunkSize));
-      }
-      task.base64Audio = `data:audio/mpeg;base64,${btoa(binary)}`;
+      task.puterPlay = puterPlay;
+      task.base64Audio = 'puter-tts';
       task.isReady = true;
-    } catch (error: any) {
-      console.warn('Server ElevenLabs TTS unavailable, trying Puter ElevenLabs:', error);
-      try {
-        const puterPlay = await createPuterElevenLabsPlayer(task.text);
-        if (!puterPlay) {
-          throw new Error('Puter ElevenLabs is unavailable in this browser');
-        }
-
-        task.puterPlay = puterPlay;
-        task.base64Audio = 'puter-elevenlabs';
-        task.isReady = true;
-        setTtsError(null);
-      } catch (puterError) {
-        console.warn('Puter ElevenLabs TTS unavailable:', puterError);
-        task.isFailed = true;
-        setTtsError('Không phát được audio: ElevenLabs server và Puter ElevenLabs đều đang lỗi.');
-      }
-      console.warn('ElevenLabs TTS unavailable:', error);
+      setTtsError(null);
+    } catch (error) {
+      console.warn('Puter TTS unavailable:', error);
       task.isFailed = true;
-      setTtsError('TTS đang lỗi ở cả ElevenLabs và fallback miễn phí, nên tạm thời chưa phát được âm thanh.');
-      setTtsError('Giọng ElevenLabs đang lỗi hoặc thiếu API key, nên tạm thời không phát được âm thanh.');
+      setTtsError('Không phát được âm thanh Puter TTS lúc này. Bạn vẫn có thể tiếp tục chat bình thường.');
     } finally {
       task.isFetching = false;
       playNextAudio();
@@ -523,7 +498,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
           await new Promise<void>((resolve, reject) => {
             const audio = new Audio(task.base64Audio);
             audio.onended = () => resolve();
-            audio.onerror = () => reject(new Error('Failed to play ElevenLabs audio'));
+            audio.onerror = () => reject(new Error('Failed to play generated audio'));
             audio.play().catch(reject);
           });
         }
@@ -552,8 +527,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
         setMessages([{
           id: 'system-reading',
           role: 'model',
-          text: '*Đang đọc đoạn thơ bằng giọng ElevenLabs (server/Puter)...*',
-          text: '*Đang đọc đoạn thơ bằng giọng ElevenLabs...*',
+          text: '*Đang đọc đoạn thơ bằng giọng Puter TTS (tiếng Việt)...*',
         }]);
 
         setPlayingAudioId('system-reading');
@@ -947,7 +921,19 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                   }`}>
                     {msg.role === 'model' && (
                       <div className="markdown-body text-[15px] leading-relaxed">
-                        <Markdown>{msg.text}</Markdown>
+                        <Markdown
+                          components={{
+                            p: ({ children }) => {
+                              const plain = Array.isArray(children) ? children.join('') : String(children ?? '');
+                              if (plain.includes('CÂU HỎI TRỌNG TÂM')) {
+                                return <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 font-semibold text-red-700">{children}</p>;
+                              }
+                              return <p>{children}</p>;
+                            },
+                          }}
+                        >
+                          {msg.text}
+                        </Markdown>
                       </div>
                     )}
                     {msg.role === 'user' && (
