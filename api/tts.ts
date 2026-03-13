@@ -46,6 +46,12 @@ export default async function handler(req: any, res: any) {
     return;
   }
 
+  const envVoiceId = process.env.ELEVENLABS_VOICE_ID?.trim();
+  const requestedVoiceId = body.voiceId?.trim();
+  const voiceCandidates = Array.from(
+    new Set([requestedVoiceId, envVoiceId, DEFAULT_ELEVENLABS_VOICE_ID].filter(Boolean) as string[]),
+  );
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort('TTS timeout'), 45000);
 
@@ -67,6 +73,49 @@ export default async function handler(req: any, res: any) {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-TTS-Provider', 'google-translate');
     res.status(200).send(Buffer.from(arrayBuffer));
+    const apiKey = process.env.ELEVENLABS_API_KEY;
+    const errors: string[] = [];
+
+    if (apiKey) {
+      for (const voiceId of voiceCandidates) {
+        const response = await requestElevenLabs({
+          apiKey,
+          text,
+          voiceId,
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          const errText = await response.text();
+          errors.push(`elevenlabs voice=${voiceId} status=${response.status} ${errText}`);
+          continue;
+        }
+
+        const arrayBuffer = await toArrayBuffer(response);
+        res.setHeader('Content-Type', 'audio/mpeg');
+        res.setHeader('Cache-Control', 'no-store');
+        res.setHeader('X-TTS-Provider', 'elevenlabs');
+        res.setHeader('X-ElevenLabs-Voice-Id', voiceId);
+        res.status(200).send(Buffer.from(arrayBuffer));
+        return;
+      }
+    } else {
+      errors.push('elevenlabs missing ELEVENLABS_API_KEY');
+    }
+
+    const freeTtsResponse = await requestGoogleTranslateTts({ text, signal: controller.signal });
+    if (freeTtsResponse.ok) {
+      const arrayBuffer = await toArrayBuffer(freeTtsResponse);
+      res.setHeader('Content-Type', 'audio/mpeg');
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('X-TTS-Provider', 'google-translate');
+      res.status(200).send(Buffer.from(arrayBuffer));
+      return;
+    }
+
+    const freeTtsError = await freeTtsResponse.text();
+    errors.push(`google-translate status=${freeTtsResponse.status} ${freeTtsError}`);
+    res.status(502).json({ error: `All TTS providers failed: ${errors.join(' | ')}` });
   } catch (error: any) {
     res.status(502).json({ error: error?.message || String(error) });
   } finally {
