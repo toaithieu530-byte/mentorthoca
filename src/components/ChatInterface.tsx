@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
 import { Send, Volume2, Loader2, ArrowLeft, User, Sparkles, BookOpen, X, Feather, Activity, Lightbulb } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -6,6 +6,14 @@ import { callPuterGemini, isPuterAvailable, streamPuterGemini } from '../lib/put
 
 const SYSTEM_PROMPT = `VAI TRÒ: Bạn là "Mentor Thẩm mĩ Thơ ca" hướng dẫn học sinh cấp 3 phân tích thơ hiện đại theo từng bước sư phạm.
 
+GIỌNG ĐIỆU & XƯNG HÔ (BẮT BUỘC):
+- Luôn xưng hô theo kiểu thân mật: "mình" (AI) và "bạn" (học sinh).
+- Tông giọng tích cực, động viên, không phán xét nặng nề.
+- Tránh lặp lại kiểu chấm "sai" liên tục; ưu tiên nhận diện phần đúng trước, rồi góp ý phần thiếu.
+
+MỤC TIÊU PHẢN HỒI:
+- Luôn giúp học sinh tự nghĩ ra đáp án trước, không làm hộ ngay.
+- Luôn chấm mức độ đúng/sai/thiếu của câu trả lời học sinh một cách cân bằng.
 MỤC TIÊU PHẢN HỒI:
 - Luôn giúp học sinh tự nghĩ ra đáp án trước, không làm hộ ngay.
 - Luôn chấm mức độ đúng/sai/thiếu của câu trả lời học sinh.
@@ -17,6 +25,11 @@ QUY TẮC BẮT BUỘC VỀ ĐỊNH DẠNG (mọi phản hồi):
 3) Tiếp theo là mục "GỢI Ý" (nếu cần).
 4) Cuối cùng luôn có dòng: "🔴 **CÂU HỎI TRỌNG TÂM:** ...".
 5) Câu hỏi trọng tâm phải chỉ có 1 câu hỏi chính, ngắn, rõ, dễ trả lời.
+
+MẪU CÂU ĐÁNH GIÁ THÂN MẬT (ƯU TIÊN DÙNG):
+- Khi đúng: "Bạn đúng rồi đấy, cách nghĩ này rất tốt." / "Bạn nắm ý khá chắc rồi, mình bổ sung thêm một chút nhé."
+- Khi thiếu: "Bạn đi đúng hướng rồi, mình thử bổ sung thêm 1 ý nữa nhé."
+- Khi sai: "Đoạn này mình nghĩ bạn thử nhìn lại một chút nhé, vì..." (không dùng lời lẽ nặng nề).
 
 THANG ĐÁNH GIÁ CÂU TRẢ LỜI HỌC SINH:
 - ĐÚNG: nêu được ý cốt lõi + có bằng chứng từ ngữ/hình ảnh thơ.
@@ -100,6 +113,14 @@ interface SummaryData {
   mainIdea: string;
 }
 
+
+interface StepRecap {
+  step: number;
+  title: string;
+  status: string;
+  note: string;
+}
+
 interface ChatInterfaceProps {
   poem: string;
   author: string;
@@ -129,6 +150,29 @@ const TEXT_API_ENDPOINTS = TEXT_API_BASE
     : [DEFAULT_TEXT_ENDPOINT, '/api/chat'];
 const TEXT_MODELS = ['openai', 'openai-large'];
 const USE_PUTER_GEMINI = (import.meta as any).env?.VITE_USE_PUTER_GEMINI !== 'false';
+const STEP_TITLES = [
+  'Tri giác đoạn thơ',
+  'Xác định tín hiệu thẩm mĩ',
+  'Phân dạng tín hiệu',
+  'Giải mã tín hiệu',
+];
+
+const safeText = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
+
+const normalizeSummaryData = (raw: Partial<SummaryData> | null | undefined): SummaryData | null => {
+  if (!raw) return null;
+  return {
+    tone: safeText(raw.tone),
+    rhythm: safeText(raw.rhythm),
+    highlights: Array.isArray(raw.highlights)
+      ? raw.highlights
+          .map((h: any) => ({ word: safeText(h?.word), analysis: safeText(h?.analysis) }))
+          .filter((h) => h.word)
+      : [],
+    mainIdea: safeText(raw.mainIdea),
+  };
+};
+
 
 export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -286,7 +330,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
       if (jsonMatch) {
         try {
           const parsed = JSON.parse(jsonMatch[1]);
-          setSummaryData(parsed);
+          setSummaryData(normalizeSummaryData(parsed));
         } catch (e) {
           console.error("Failed to parse summary JSON", e);
         }
@@ -297,6 +341,52 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
       setSummaryText(cleanText);
     }
   };
+
+
+
+  const effectiveSummaryData = useMemo<SummaryData>(() => {
+    const fallbackHighlights = highlights.map((word) => ({
+      word,
+      analysis: 'Tín hiệu thẩm mĩ đã được xác nhận trong quá trình thảo luận.',
+    }));
+
+    const base = normalizeSummaryData(summaryData) || {
+      tone: '',
+      rhythm: '',
+      highlights: [],
+      mainIdea: '',
+    };
+
+    const inferredMainIdea = summaryText
+      .split('\n')
+      .map((line) => line.trim())
+      .find((line) => line && !line.startsWith('###') && !line.startsWith('🔴') && !line.startsWith('ĐÁNH GIÁ')) || '';
+
+    return {
+      tone: base.tone || 'Đã phân tích trong hội thoại',
+      rhythm: base.rhythm || (rhythmLines.length ? rhythmLines.join(' | ') : 'Đang cập nhật từ phần trao đổi'),
+      highlights: base.highlights.length ? base.highlights : fallbackHighlights,
+      mainIdea: base.mainIdea || inferredMainIdea || 'Đã tổng hợp từ 4 bước tìm và giải mã tín hiệu thẩm mĩ.',
+    };
+  }, [summaryData, highlights, rhythmLines, summaryText]);
+
+  const stepRecap = useMemo<StepRecap[]>(() => {
+    const modelTexts = messages.filter((m) => m.role === 'model').map((m) => m.text);
+
+    return STEP_TITLES.map((title, index) => {
+      const step = index + 1;
+      const related = [...modelTexts].reverse().find((text) => new RegExp(`BƯỚC\s*${step}`, 'i').test(text));
+      const evaluationMatch = related?.match(/ĐÁNH GIÁ\s*[:：]\s*([^\n]+)/i);
+      const questionMatch = related?.match(/CÂU HỎI TRỌNG TÂM\s*[:：]\s*([^\n]+)/i);
+
+      return {
+        step,
+        title,
+        status: related ? 'Đã thực hiện' : 'Chưa ghi nhận',
+        note: evaluationMatch?.[1]?.trim() || questionMatch?.[1]?.trim() || 'Đang chờ cập nhật từ hội thoại.',
+      };
+    });
+  }, [messages]);
 
   const renderPoem = () => {
     let lines = poem.split('\n');
@@ -740,7 +830,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                       </div>
                       <h4 className="text-xs font-bold text-[#7A7A5A] uppercase tracking-[0.2em] mb-3">Giọng điệu</h4>
                       <p className="text-2xl font-serif text-[#2c2c28] leading-tight italic">
-                        {summaryData?.tone || "Đang cập nhật..."}
+                        {effectiveSummaryData.tone || "Đang cập nhật..."}
                       </p>
                     </motion.div>
 
@@ -755,7 +845,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                       </div>
                       <h4 className="text-xs font-bold text-[#7A7A5A] uppercase tracking-[0.2em] mb-3">Nhịp thơ</h4>
                       <p className="text-2xl font-serif text-[#2c2c28] leading-tight italic">
-                        {summaryData?.rhythm || "Đang cập nhật..."}
+                        {effectiveSummaryData.rhythm || "Đang cập nhật..."}
                       </p>
                     </motion.div>
                   </div>
@@ -794,7 +884,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                     </div>
                     
                     <div className="space-y-6 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
-                      {summaryData?.highlights?.map((h, i) => (
+                      {effectiveSummaryData.highlights?.map((h, i) => (
                         <motion.div 
                           key={i}
                           initial={{ opacity: 0, y: 10 }}
@@ -811,7 +901,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                           </p>
                         </motion.div>
                       ))}
-                      {!summaryData?.highlights?.length && (
+                      {!effectiveSummaryData.highlights?.length && (
                         <div className="text-center py-12">
                           <p className="text-[#7A7A5A] italic text-sm">Chưa có điểm sáng nào được ghi nhận.</p>
                         </div>
@@ -834,7 +924,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                   <div className="relative z-10 max-w-3xl mx-auto text-center">
                     <h4 className="text-xs font-bold text-white/60 uppercase tracking-[0.3em] mb-6">Cảm hứng chủ đạo & Nội dung chính</h4>
                     <p className="text-2xl md:text-3xl font-serif leading-relaxed italic">
-                      "{summaryData?.mainIdea || "Đang tổng hợp nội dung..."}"
+                      "{effectiveSummaryData.mainIdea || "Đang tổng hợp nội dung..."}"
                     </p>
                   </div>
                 </motion.div>
@@ -857,6 +947,27 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                     </div>
                   </motion.div>
                 )}
+
+
+                {/* 4-Step Recap */}
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.9 }}
+                  className="max-w-5xl mx-auto mb-12"
+                >
+                  <h4 className="text-xs font-bold text-[#7A7A5A] uppercase tracking-[0.25em] mb-5 text-center">Tổng hợp 4 bước tìm & giải mã tín hiệu thẩm mĩ</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {stepRecap.map((item) => (
+                      <div key={item.step} className="rounded-2xl border border-[#e0e0d8] bg-white px-5 py-4 shadow-sm">
+                        <p className="text-[11px] uppercase tracking-[0.2em] text-[#7A7A5A] mb-1">Bước {item.step}</p>
+                        <p className="text-base font-semibold text-[#2c2c28] mb-1">{item.title}</p>
+                        <p className="text-sm text-[#5A5A40] mb-2">{item.status}</p>
+                        <p className="text-sm text-[#66664a] italic leading-relaxed">{item.note}</p>
+                      </div>
+                    ))}
+                  </div>
+                </motion.div>
 
                 {/* Action Buttons */}
                 <motion.div 
