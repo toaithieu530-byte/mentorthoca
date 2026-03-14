@@ -167,6 +167,8 @@ const escapeXml = (value: string): string =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 const normalizeSummaryData = (raw: Partial<SummaryData> | null | undefined): SummaryData | null => {
   if (!raw) return null;
   return {
@@ -625,7 +627,9 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
       if (highlights.length > 0) {
         highlights.forEach(word => {
           if (!word) return;
-          const regex = new RegExp(`(${word})`, 'gi');
+          const safeWord = escapeRegExp(word.trim());
+          if (!safeWord) return;
+          const regex = new RegExp(`(${safeWord})`, 'gi');
           lineElements = lineElements.flatMap(part => {
             if (typeof part === 'string') {
               const splits = part.split(regex);
