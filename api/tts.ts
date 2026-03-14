@@ -85,6 +85,18 @@ export default async function handler(req: any, res: any) {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-TTS-Provider', 'google-translate');
     res.status(200).send(Buffer.from(arrayBuffer));
+
+    if (!response.ok) {
+      const errText = await response.text();
+      res.status(502).json({ error: `Google TTS failed (${response.status}): ${errText}` });
+      return;
+    }
+
+    const arrayBuffer = await toArrayBuffer(response);
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-TTS-Provider', 'google-translate');
+    res.status(200).send(Buffer.from(arrayBuffer));
     const apiKey = process.env.ELEVENLABS_API_KEY;
     const errors: string[] = [];
 

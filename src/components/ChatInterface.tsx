@@ -158,6 +158,13 @@ const STEP_TITLES = [
 ];
 
 const safeText = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
+const escapeXml = (value: string): string =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 
 const normalizeSummaryData = (raw: Partial<SummaryData> | null | undefined): SummaryData | null => {
   if (!raw) return null;
@@ -363,6 +370,10 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
       .find((line) => line && !line.startsWith('###') && !line.startsWith('🔴') && !line.startsWith('ĐÁNH GIÁ')) || '';
 
     return {
+      tone: base.tone || 'Chưa đủ dữ liệu giọng điệu (cần xác nhận rõ ở Bước 1).',
+      rhythm: base.rhythm || (rhythmLines.length ? rhythmLines.join(' | ') : 'Chưa có nhịp thơ được xác nhận bằng [RHYTHM].'),
+      highlights: base.highlights.length ? base.highlights : fallbackHighlights,
+      mainIdea: base.mainIdea || inferredMainIdea || 'Chưa có kết luận nội dung chính rõ ràng từ phần tổng kết.',
       tone: base.tone || 'Đã phân tích trong hội thoại',
       rhythm: base.rhythm || (rhythmLines.length ? rhythmLines.join(' | ') : 'Đang cập nhật từ phần trao đổi'),
       highlights: base.highlights.length ? base.highlights : fallbackHighlights,
@@ -387,6 +398,109 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
       };
     });
   }, [messages]);
+
+  const downloadMindMap = () => {
+    const width = 1600;
+    const height = 1000;
+    const centerX = width / 2;
+    const centerY = 150;
+
+    const nodes = [
+      { x: centerX, y: centerY, title: `Tổng kết: ${author}`, body: effectiveSummaryData.mainIdea, color: '#5A5A40' },
+      { x: 230, y: 360, title: 'Giọng điệu', body: effectiveSummaryData.tone, color: '#2563eb' },
+      { x: 1370, y: 360, title: 'Nhịp thơ', body: effectiveSummaryData.rhythm, color: '#dc2626' },
+      {
+        x: 230,
+        y: 690,
+        title: 'Điểm sáng ngôn từ',
+        body: effectiveSummaryData.highlights.length
+          ? effectiveSummaryData.highlights.map((h) => `${h.word}: ${h.analysis}`).join(' | ')
+          : 'Chưa có điểm sáng được xác nhận.',
+        color: '#ca8a04',
+      },
+      {
+        x: 1370,
+        y: 690,
+        title: '4 bước đã học',
+        body: stepRecap.map((s) => `B${s.step} ${s.title}: ${s.status}. ${s.note}`).join(' | '),
+        color: '#7c3aed',
+      },
+    ];
+
+    const wrap = (text: string, maxLen = 46): string[] => {
+      const words = text.split(/\s+/).filter(Boolean);
+      const lines: string[] = [];
+      let line = '';
+
+      for (const word of words) {
+        const candidate = line ? `${line} ${word}` : word;
+        if (candidate.length > maxLen) {
+          if (line) lines.push(line);
+          line = word;
+        } else {
+          line = candidate;
+        }
+      }
+      if (line) lines.push(line);
+      return lines.slice(0, 6);
+    };
+
+    const edges = [
+      [0, 1],
+      [0, 2],
+      [0, 3],
+      [0, 4],
+    ];
+
+    const edgeSvg = edges
+      .map(([a, b]) => {
+        const from = nodes[a];
+        const to = nodes[b];
+        return `<path d="M ${from.x} ${from.y + 70} C ${from.x} ${from.y + 200}, ${to.x} ${to.y - 200}, ${to.x} ${to.y - 70}" stroke="#cbd5e1" stroke-width="4" fill="none" />`;
+      })
+      .join('');
+
+    const nodeSvg = nodes
+      .map((node) => {
+        const lines = wrap(node.body);
+        const title = escapeXml(node.title);
+        const lineSvg = lines
+          .map((line, idx) => `<tspan x="${node.x}" dy="${idx === 0 ? 0 : 28}">${escapeXml(line)}</tspan>`)
+          .join('');
+
+        return `
+          <g>
+            <rect x="${node.x - 250}" y="${node.y - 80}" width="500" height="220" rx="28" fill="white" stroke="${node.color}" stroke-width="3" />
+            <text x="${node.x}" y="${node.y - 35}" text-anchor="middle" font-size="30" font-family="Georgia, serif" fill="${node.color}" font-weight="700">${title}</text>
+            <text x="${node.x}" y="${node.y + 5}" text-anchor="middle" font-size="24" font-family="Arial, sans-serif" fill="#334155">${lineSvg}</text>
+          </g>
+        `;
+      })
+      .join('');
+
+    const svg = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+        <defs>
+          <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+            <stop offset="0%" stop-color="#f8fafc" />
+            <stop offset="100%" stop-color="#eef2ff" />
+          </linearGradient>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#bg)" />
+        <text x="${width / 2}" y="60" text-anchor="middle" font-size="34" font-family="Georgia, serif" fill="#1e293b" font-weight="700">Sơ đồ tư duy bài học thẩm mĩ thơ ca</text>
+        ${edgeSvg}
+        ${nodeSvg}
+      </svg>
+    `;
+
+    const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `mindmap-${author.replace(/\s+/g, '-').toLowerCase() || 'tho-ca'}.svg`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const renderPoem = () => {
     let lines = poem.split('\n');
@@ -830,6 +944,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                       </div>
                       <h4 className="text-xs font-bold text-[#7A7A5A] uppercase tracking-[0.2em] mb-3">Giọng điệu</h4>
                       <p className="text-2xl font-serif text-[#2c2c28] leading-tight italic">
+                        {effectiveSummaryData.tone}
                         {effectiveSummaryData.tone || "Đang cập nhật..."}
                       </p>
                     </motion.div>
@@ -845,6 +960,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                       </div>
                       <h4 className="text-xs font-bold text-[#7A7A5A] uppercase tracking-[0.2em] mb-3">Nhịp thơ</h4>
                       <p className="text-2xl font-serif text-[#2c2c28] leading-tight italic">
+                        {effectiveSummaryData.rhythm}
                         {effectiveSummaryData.rhythm || "Đang cập nhật..."}
                       </p>
                     </motion.div>
@@ -903,7 +1019,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                       ))}
                       {!effectiveSummaryData.highlights?.length && (
                         <div className="text-center py-12">
-                          <p className="text-[#7A7A5A] italic text-sm">Chưa có điểm sáng nào được ghi nhận.</p>
+                          <p className="text-[#7A7A5A] italic text-sm">Chưa có điểm sáng được xác nhận ở phần học; bạn có thể quay lại Bước 2 để bổ sung.</p>
                         </div>
                       )}
                     </div>
@@ -924,6 +1040,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                   <div className="relative z-10 max-w-3xl mx-auto text-center">
                     <h4 className="text-xs font-bold text-white/60 uppercase tracking-[0.3em] mb-6">Cảm hứng chủ đạo & Nội dung chính</h4>
                     <p className="text-2xl md:text-3xl font-serif leading-relaxed italic">
+                      "{effectiveSummaryData.mainIdea}"
                       "{effectiveSummaryData.mainIdea || "Đang tổng hợp nội dung..."}"
                     </p>
                   </div>
@@ -985,11 +1102,11 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                   </button>
                   
                   <button
-                    onClick={() => window.print()}
+                    onClick={downloadMindMap}
                     className="px-10 py-5 bg-white text-[#5A5A40] border border-[#e0e0d8] rounded-full font-medium hover:bg-[#f5f5f0] transition-all duration-300 shadow-sm flex items-center gap-3"
                   >
                     <Feather className="w-5 h-5" />
-                    Lưu lại hành trình
+                    Tải sơ đồ mind map
                   </button>
                 </motion.div>
               </motion.div>
