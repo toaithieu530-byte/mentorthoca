@@ -1,53 +1,71 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
 import { Send, Volume2, Loader2, ArrowLeft, User, Sparkles, BookOpen, X, Feather, Activity, Lightbulb } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { callPuterGemini, isPuterAvailable, streamPuterGemini } from '../lib/puter';
 
-const SYSTEM_PROMPT = `Định vị: Bạn là "Mentor Thẩm mĩ Thơ ca", một chuyên gia Văn học và là người dẫn dắt đầy tính sư phạm. Nhiệm vụ của bạn là hướng dẫn học sinh cấp 3 phát hiện và giải mã tín hiệu thẩm mĩ trong thơ hiện đại dựa trên phương pháp tri giác và tư duy ngôn ngữ nghệ thuật.
+const SYSTEM_PROMPT = `VAI TRÒ: Bạn là "Mentor Thẩm mĩ Thơ ca" hướng dẫn học sinh cấp 3 phân tích thơ hiện đại theo từng bước sư phạm.
 
-Nguyên tắc tối thượng:
-1. KHÔNG BAO GIỜ làm bài hộ trọn vẹn, nhưng vẫn phải giảng đủ sâu để học sinh hiểu bản chất nghệ thuật.
-2. KHÔNG BAO GIỜ đưa ra gợi ý hay đáp án trước khi học sinh trả lời.
-3. LUÔN LUÔN ĐẶT CÂU HỎI VÀ DỪNG LẠI CHỜ HỌC SINH TRẢ LỜI. Mỗi phản hồi nên gồm 5-8 câu: 2-3 câu gợi mở, 2-3 câu giảng ngắn, và 1 câu hỏi tiếp theo.
-4. LUÔN KHUYẾN KHÍCH học sinh huy động vốn sống, vốn hiểu biết thực tế và trí tưởng tượng để đối chiếu với các tín hiệu trong thơ.
+GIỌNG ĐIỆU & XƯNG HÔ (BẮT BUỘC):
+- Luôn xưng hô theo kiểu thân mật: "mình" (AI) và "bạn" (học sinh).
+- Tông giọng tích cực, động viên, không phán xét nặng nề.
+- Tránh lặp lại kiểu chấm "sai" liên tục; ưu tiên nhận diện phần đúng trước, rồi góp ý phần thiếu.
 
-CÔNG CỤ TƯƠNG TÁC (Đặt ở cuối câu trả lời):
-- [RHYTHM: dòng 1 / ngắt nhịp, dòng 2 / ngắt nhịp]: Chỉ dùng khi xác nhận nhịp điệu học sinh nêu.
-- [HIGHLIGHT: từ 1, từ 2]: Chỉ dùng khi xác nhận tín hiệu thẩm mĩ học sinh đã chọn.
-- [CLEAR_MARKUP]: Xóa hiệu ứng cũ.
-- [SUMMARY_MODE]: Kích hoạt giao diện tổng kết ở Bước 5.
+MỤC TIÊU PHẢN HỒI:
+- Luôn giúp học sinh tự nghĩ ra đáp án trước, không làm hộ ngay.
+- Luôn chấm mức độ đúng/sai/thiếu của câu trả lời học sinh một cách cân bằng.
+- Nếu học sinh sai hoặc thiếu: gợi ý tăng dần tối đa 3 lượt. Sau lượt thứ 3 vẫn chưa đạt thì mới đưa đáp án mẫu ngắn gọn.
 
-LUỒNG XỬ LÝ THEO TÀI LIỆU HƯỚNG DẪN:
+QUY TẮC BẮT BUỘC VỀ ĐỊNH DẠNG (mọi phản hồi):
+1) Dòng đầu tiên luôn là tiêu đề bước: "### BƯỚC X: ...".
+2) Tiếp theo là mục "ĐÁNH GIÁ" (đúng/sai/thiếu + vì sao).
+3) Tiếp theo là mục "GỢI Ý" (nếu cần).
+4) Cuối cùng luôn có dòng: "🔴 **CÂU HỎI TRỌNG TÂM:** ...".
+5) Câu hỏi trọng tâm phải chỉ có 1 câu hỏi chính, ngắn, rõ, dễ trả lời.
 
-BƯỚC 1: TRI GIÁC ĐOẠN THƠ (Perception)
-- Mục tiêu: Tái hiện hình tượng thơ qua giọng điệu và nhịp điệu.
-- AI nhận định nhanh về giọng điệu chính (hào hùng, trầm lắng, thiết tha...).
-- Câu hỏi gợi mở: "Để nhập vai vào chủ thể trữ tình trong đoạn thơ này, bạn nghĩ chúng ta nên ngắt nhịp thế nào và đọc với giọng điệu ra sao để bộc lộ đúng nỗi niềm của tác giả?"
--> DỪNG LẠI CHỜ.
+MẪU CÂU ĐÁNH GIÁ THÂN MẬT (ƯU TIÊN DÙNG):
+- Khi đúng: "Bạn đúng rồi đấy, cách nghĩ này rất tốt." / "Bạn nắm ý khá chắc rồi, mình bổ sung thêm một chút nhé."
+- Khi thiếu: "Bạn đi đúng hướng rồi, mình thử bổ sung thêm 1 ý nữa nhé."
+- Khi sai: "Đoạn này mình nghĩ bạn thử nhìn lại một chút nhé, vì..." (không dùng lời lẽ nặng nề).
 
-BƯỚC 2: XÁC ĐỊNH TÍN HIỆU THẨM MĨ (Identification)
-- Mục tiêu: Phân biệt kí hiệu ngôn ngữ thông thường và tín hiệu thẩm mĩ (đa nghĩa, gợi hình, gợi cảm).
-- AI yêu cầu học sinh nhặt ra các từ/cụm từ "lạ", "đặc biệt" hoặc "có sức gợi" nhất.
-- Gợi ý: "Hãy tìm những điểm sáng ngôn từ mà bạn thấy không thể thay thế bằng từ khác được."
--> DỪNG LẠI CHỜ.
+THANG ĐÁNH GIÁ CÂU TRẢ LỜI HỌC SINH:
+- ĐÚNG: nêu được ý cốt lõi + có bằng chứng từ ngữ/hình ảnh thơ.
+- THIẾU: đúng hướng nhưng thiếu ví dụ, thiếu tín hiệu thẩm mĩ, hoặc xếp loại chưa đủ nhóm.
+- SAI: lệch nghĩa văn bản hoặc không bám câu chữ.
 
-BƯỚC 3: PHÂN DẠNG TÍN HIỆU (Classification)
-- AI hướng dẫn học sinh xếp các tín hiệu đã tìm được vào 4 nhóm chuẩn:
-  1. Đặc trưng thể loại (Thể thơ, vần, nhịp).
-  2. Từ ngữ đặc biệt (Từ tượng hình/thanh, từ được cắt nghĩa mới, từ mô tả trạng thái).
-  3. Biện pháp tu từ (So sánh, ẩn dụ, hoán dụ, điệp...).
-  4. Cấu trúc cú pháp (Đảo ngữ, đối, kết hợp từ lạ).
--> DỪNG LẠI CHỜ.
+CƠ CHẾ GỢI Ý 3 LẦN:
+- Lần 1: gợi ý định hướng rất nhẹ (không lộ đáp án).
+- Lần 2: gợi ý cụ thể hơn, khoanh vùng từ khóa/câu thơ.
+- Lần 3: gợi ý gần đáp án (khung trả lời).
+- Sau 3 lần chưa đạt: đưa đáp án mẫu ngắn + giải thích vì sao.
 
-BƯỚC 4: GIẢI MÃ TÍN HIỆU (Decoding)
-- Mục tiêu: Đi từ nhận thức cảm tính đến phân tích dụng ý nghệ thuật.
-- Thủ pháp: So sánh tín hiệu thẩm mĩ với từ ngữ thông thường tương đương để thấy sự "phi lý" hoặc "khác thường".
-- Câu hỏi: "Tại sao tác giả lại dùng [Tín hiệu] mà không dùng [Từ thông thường]? Cách nói này giúp bạn liên tưởng đến hình ảnh hay cảm xúc gì trong đời sống thực tế?"
--> DỪNG LẠI CHỜ TỪNG TÍN HIỆU MỘT.
+CÔNG CỤ TƯƠNG TÁC (đặt cuối khi phù hợp):
+- [RHYTHM: dòng 1 / ngắt nhịp, dòng 2 / ngắt nhịp]
+- [HIGHLIGHT: từ 1, từ 2]
+- [CLEAR_MARKUP]
+- [SUMMARY_MODE]
 
-BƯỚC 5: TỔNG KẾT (Summary)
-- Tổng hợp lại thành chỉnh thể nghệ thuật. Bắt buộc dùng thẻ [SUMMARY_MODE] và định dạng JSON như mẫu cũ.`;
+QUY TẮC KÍCH HOẠT TƯƠNG TÁC TRÊN VĂN BẢN THƠ (BẮT BUỘC):
+- Khi học sinh trả lời ĐÚNG về nhịp: bắt buộc thêm [RHYTHM: ...] để hiện dấu ngắt nhịp trực tiếp trên bài thơ bên trái.
+- Khi học sinh trả lời ĐÚNG về hình ảnh/từ ngữ/tín hiệu thẩm mĩ: bắt buộc thêm [HIGHLIGHT: ...] để tô đậm từ/cụm từ tương ứng.
+- Khi chuyển sang phân tích sâu một từ/hình ảnh cụ thể: bắt buộc thêm [HIGHLIGHT: ...] chứa đúng từ/hình ảnh đang phân tích.
+- Nếu học sinh trả lời sai hoàn toàn, có thể dùng [CLEAR_MARKUP] để xóa đánh dấu cũ trước khi dẫn dắt lại.
+
+LUỒNG DẠY HỌC:
+### BƯỚC 1: TRI GIÁC ĐOẠN THƠ
+- Mục tiêu: nhận giọng điệu, nhịp điệu, cảm xúc chủ đạo.
+
+### BƯỚC 2: XÁC ĐỊNH TÍN HIỆU THẨM MĨ
+- Mục tiêu: chọn từ/cụm từ "đắt", đa nghĩa, gợi hình/gợi cảm.
+
+### BƯỚC 3: PHÂN DẠNG TÍN HIỆU
+- Mục tiêu: xếp vào nhóm thể loại, từ ngữ đặc biệt, tu từ, cú pháp.
+
+### BƯỚC 4: GIẢI MÃ TÍN HIỆU
+- Mục tiêu: phân tích dụng ý nghệ thuật, hiệu quả biểu đạt.
+
+### BƯỚC 5: TỔNG KẾT
+- Bắt buộc dùng [SUMMARY_MODE] + JSON tổng kết như schema cũ.`;
 
 async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3, baseDelay = 400): Promise<T> {
   let attempt = 0;
@@ -84,22 +102,20 @@ interface Message {
   isAudioLoading?: boolean;
 }
 
-interface AudioTask {
-  text: string;
-  base64Audio?: string;
-  isFetching: boolean;
-  isReady: boolean;
-  isFailed: boolean;
-  puterPlay?: () => Promise<void>;
-  onStart?: () => void;
-  onEnd?: () => void;
-}
 
 interface SummaryData {
   tone: string;
   rhythm: string;
   highlights: { word: string; analysis: string }[];
   mainIdea: string;
+}
+
+
+interface StepRecap {
+  step: number;
+  title: string;
+  status: string;
+  note: string;
 }
 
 interface ChatInterfaceProps {
@@ -130,10 +146,37 @@ const TEXT_API_ENDPOINTS = TEXT_API_BASE
     ? ['/api/chat', DEFAULT_TEXT_ENDPOINT]
     : [DEFAULT_TEXT_ENDPOINT, '/api/chat'];
 const TEXT_MODELS = ['openai', 'openai-large'];
-const ELEVENLABS_TTS_ENDPOINT = '/api/tts';
-const ELEVENLABS_VOICE_ID = (import.meta as any).env?.VITE_ELEVENLABS_VOICE_ID as string | undefined;
-const PUTER_ELEVENLABS_VOICE_ID = 'jdlxsPOZOHdGEfcItXVu';
 const USE_PUTER_GEMINI = (import.meta as any).env?.VITE_USE_PUTER_GEMINI !== 'false';
+const STEP_TITLES = [
+  'Tri giác đoạn thơ',
+  'Xác định tín hiệu thẩm mĩ',
+  'Phân dạng tín hiệu',
+  'Giải mã tín hiệu',
+];
+
+const safeText = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
+const escapeXml = (value: string): string =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+const normalizeSummaryData = (raw: Partial<SummaryData> | null | undefined): SummaryData | null => {
+  if (!raw) return null;
+  return {
+    tone: safeText(raw.tone),
+    rhythm: safeText(raw.rhythm),
+    highlights: Array.isArray(raw.highlights)
+      ? raw.highlights
+          .map((h: any) => ({ word: safeText(h?.word), analysis: safeText(h?.analysis) }))
+          .filter((h) => h.word)
+      : [],
+    mainIdea: safeText(raw.mainIdea),
+  };
+};
+
 
 export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -141,7 +184,6 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [chatSession, setChatSession] = useState<ChatSession | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const [showMobilePoem, setShowMobilePoem] = useState(false);
   
   const [initStage, setInitStage] = useState<'analyzing' | 'reading' | 'ready'>('reading');
@@ -154,7 +196,6 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
   const [summaryText, setSummaryText] = useState('');
   const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
   const [rhythmLines, setRhythmLines] = useState<string[]>([]);
-  const [ttsError, setTtsError] = useState<string | null>(null);
   
   const initializedRef = useRef(false);
   const convoHistoryRef = useRef<PollinationsMessage[]>([]);
@@ -267,21 +308,23 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
   };
 
   const parseMarkup = (text: string) => {
-    const rhythmMatch = text.match(/\[RHYTHM:\s*(.*?)\]/);
-    if (rhythmMatch) {
-      const lines = rhythmMatch[1].split(',').map(l => l.trim());
-      setRhythmLines(lines);
-    }
-    
-    const highlightMatch = text.match(/\[HIGHLIGHT:\s*(.*?)\]/);
-    if (highlightMatch) {
-      const words = highlightMatch[1].split(',').map(w => w.trim());
-      setHighlights(words);
-    }
-    
     if (text.includes('[CLEAR_MARKUP]')) {
       setHighlights([]);
       setRhythmLines([]);
+    }
+
+    const rhythmMatches = Array.from(text.matchAll(/\[RHYTHM:\s*(.*?)\]/g));
+    if (rhythmMatches.length > 0) {
+      const lastRhythm = rhythmMatches[rhythmMatches.length - 1]?.[1] || '';
+      const lines = lastRhythm.split(',').map(l => l.trim()).filter(Boolean);
+      setRhythmLines(lines);
+    }
+
+    const highlightMatches = Array.from(text.matchAll(/\[HIGHLIGHT:\s*(.*?)\]/g));
+    if (highlightMatches.length > 0) {
+      const lastHighlight = highlightMatches[highlightMatches.length - 1]?.[1] || '';
+      const words = lastHighlight.split(',').map(w => w.trim()).filter(Boolean);
+      setHighlights(words);
     }
     
     if (text.includes('[SUMMARY_MODE]')) {
@@ -291,7 +334,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
       if (jsonMatch) {
         try {
           const parsed = JSON.parse(jsonMatch[1]);
-          setSummaryData(parsed);
+          setSummaryData(normalizeSummaryData(parsed));
         } catch (e) {
           console.error("Failed to parse summary JSON", e);
         }
@@ -301,6 +344,155 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
       const cleanText = text.replace(/\[SUMMARY_MODE\]/g, '').replace(/\[RHYTHM:.*?\]/g, '').replace(/\[HIGHLIGHT:.*?\]/g, '').replace(/```json[\s\S]*?```/g, '').trim();
       setSummaryText(cleanText);
     }
+  };
+
+
+
+  const effectiveSummaryData = useMemo<SummaryData>(() => {
+    const fallbackHighlights = highlights.map((word) => ({
+      word,
+      analysis: 'Tín hiệu thẩm mĩ đã được xác nhận trong quá trình thảo luận.',
+    }));
+
+    const base = normalizeSummaryData(summaryData) || {
+      tone: '',
+      rhythm: '',
+      highlights: [],
+      mainIdea: '',
+    };
+
+    const inferredMainIdea = summaryText
+      .split('\n')
+      .map((line) => line.trim())
+      .find((line) => line && !line.startsWith('###') && !line.startsWith('🔴') && !line.startsWith('ĐÁNH GIÁ')) || '';
+
+    return {
+      tone: base.tone || 'Chưa đủ dữ liệu giọng điệu (cần xác nhận rõ ở Bước 1).',
+      rhythm: base.rhythm || (rhythmLines.length ? rhythmLines.join(' | ') : 'Chưa có nhịp thơ được xác nhận bằng [RHYTHM].'),
+      highlights: base.highlights.length ? base.highlights : fallbackHighlights,
+      mainIdea: base.mainIdea || inferredMainIdea || 'Chưa có kết luận nội dung chính rõ ràng từ phần tổng kết.',
+    };
+  }, [summaryData, highlights, rhythmLines, summaryText]);
+
+  const stepRecap = useMemo<StepRecap[]>(() => {
+    const modelTexts = messages.filter((m) => m.role === 'model').map((m) => m.text);
+
+    return STEP_TITLES.map((title, index) => {
+      const step = index + 1;
+      const related = [...modelTexts].reverse().find((text) => new RegExp(`BƯỚC\s*${step}`, 'i').test(text));
+      const evaluationMatch = related?.match(/ĐÁNH GIÁ\s*[:：]\s*([^\n]+)/i);
+      const questionMatch = related?.match(/CÂU HỎI TRỌNG TÂM\s*[:：]\s*([^\n]+)/i);
+
+      return {
+        step,
+        title,
+        status: related ? 'Đã thực hiện' : 'Chưa ghi nhận',
+        note: evaluationMatch?.[1]?.trim() || questionMatch?.[1]?.trim() || 'Đang chờ cập nhật từ hội thoại.',
+      };
+    });
+  }, [messages]);
+
+  const downloadMindMap = () => {
+    const width = 1600;
+    const height = 1000;
+    const centerX = width / 2;
+    const centerY = 150;
+
+    const nodes = [
+      { x: centerX, y: centerY, title: `Tổng kết: ${author}`, body: effectiveSummaryData.mainIdea, color: '#5A5A40' },
+      { x: 230, y: 360, title: 'Giọng điệu', body: effectiveSummaryData.tone, color: '#2563eb' },
+      { x: 1370, y: 360, title: 'Nhịp thơ', body: effectiveSummaryData.rhythm, color: '#dc2626' },
+      {
+        x: 230,
+        y: 690,
+        title: 'Điểm sáng ngôn từ',
+        body: effectiveSummaryData.highlights.length
+          ? effectiveSummaryData.highlights.map((h) => `${h.word}: ${h.analysis}`).join(' | ')
+          : 'Chưa có điểm sáng được xác nhận.',
+        color: '#ca8a04',
+      },
+      {
+        x: 1370,
+        y: 690,
+        title: '4 bước đã học',
+        body: stepRecap.map((s) => `B${s.step} ${s.title}: ${s.status}. ${s.note}`).join(' | '),
+        color: '#7c3aed',
+      },
+    ];
+
+    const wrap = (text: string, maxLen = 46): string[] => {
+      const words = text.split(/\s+/).filter(Boolean);
+      const lines: string[] = [];
+      let line = '';
+
+      for (const word of words) {
+        const candidate = line ? `${line} ${word}` : word;
+        if (candidate.length > maxLen) {
+          if (line) lines.push(line);
+          line = word;
+        } else {
+          line = candidate;
+        }
+      }
+      if (line) lines.push(line);
+      return lines.slice(0, 6);
+    };
+
+    const edges = [
+      [0, 1],
+      [0, 2],
+      [0, 3],
+      [0, 4],
+    ];
+
+    const edgeSvg = edges
+      .map(([a, b]) => {
+        const from = nodes[a];
+        const to = nodes[b];
+        return `<path d="M ${from.x} ${from.y + 70} C ${from.x} ${from.y + 200}, ${to.x} ${to.y - 200}, ${to.x} ${to.y - 70}" stroke="#cbd5e1" stroke-width="4" fill="none" />`;
+      })
+      .join('');
+
+    const nodeSvg = nodes
+      .map((node) => {
+        const lines = wrap(node.body);
+        const title = escapeXml(node.title);
+        const lineSvg = lines
+          .map((line, idx) => `<tspan x="${node.x}" dy="${idx === 0 ? 0 : 28}">${escapeXml(line)}</tspan>`)
+          .join('');
+
+        return `
+          <g>
+            <rect x="${node.x - 250}" y="${node.y - 80}" width="500" height="220" rx="28" fill="white" stroke="${node.color}" stroke-width="3" />
+            <text x="${node.x}" y="${node.y - 35}" text-anchor="middle" font-size="30" font-family="Georgia, serif" fill="${node.color}" font-weight="700">${title}</text>
+            <text x="${node.x}" y="${node.y + 5}" text-anchor="middle" font-size="24" font-family="Arial, sans-serif" fill="#334155">${lineSvg}</text>
+          </g>
+        `;
+      })
+      .join('');
+
+    const svg = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+        <defs>
+          <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+            <stop offset="0%" stop-color="#f8fafc" />
+            <stop offset="100%" stop-color="#eef2ff" />
+          </linearGradient>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#bg)" />
+        <text x="${width / 2}" y="60" text-anchor="middle" font-size="34" font-family="Georgia, serif" fill="#1e293b" font-weight="700">Sơ đồ tư duy bài học thẩm mĩ thơ ca</text>
+        ${edgeSvg}
+        ${nodeSvg}
+      </svg>
+    `;
+
+    const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `mindmap-${author.replace(/\s+/g, '-').toLowerCase() || 'tho-ca'}.svg`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const renderPoem = () => {
@@ -374,172 +566,6 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
     });
   };
 
-  const audioTasks = useRef<AudioTask[]>([]);
-  const isPlayingAudio = useRef(false);
-
-  const stopAllAudio = () => {
-    audioTasks.current = [];
-    isPlayingAudio.current = false;
-  };
-
-  const addAudioTask = (text: string, onStart?: () => void, onEnd?: () => void) => {
-    const task: AudioTask = { text, isFetching: false, isReady: false, isFailed: false, onStart, onEnd };
-    audioTasks.current.push(task);
-    fetchNextAudio();
-  };
-
-
-  const createPuterElevenLabsPlayer = async (text: string): Promise<(() => Promise<void>) | null> => {
-    const puter = (window as any).puter;
-    if (!puter?.ai?.txt2speech) return null;
-
-    const audioLike = await puter.ai.txt2speech(text, {
-      provider: 'elevenlabs',
-      voice: PUTER_ELEVENLABS_VOICE_ID,
-      model: 'eleven_multilingual_v2',
-      output_format: 'mp3_44100_128',
-    });
-
-    return async () => {
-      if (audioLike?.pause) {
-        try {
-          audioLike.currentTime = 0;
-        } catch {}
-      }
-
-      await new Promise<void>((resolve, reject) => {
-        if (!audioLike || typeof audioLike.play !== 'function') {
-          reject(new Error('Puter txt2speech returned unsupported audio object'));
-          return;
-        }
-
-        const cleanup = () => {
-          if (typeof audioLike.removeEventListener === 'function') {
-            audioLike.removeEventListener('ended', onEnded);
-            audioLike.removeEventListener('error', onError);
-          }
-        };
-
-        const onEnded = () => {
-          cleanup();
-          resolve();
-        };
-
-        const onError = () => {
-          cleanup();
-          reject(new Error('Puter ElevenLabs playback failed'));
-        };
-
-        if (typeof audioLike.addEventListener === 'function') {
-          audioLike.addEventListener('ended', onEnded);
-          audioLike.addEventListener('error', onError);
-        }
-
-        Promise.resolve(audioLike.play())
-          .then(() => {
-            if (typeof audioLike.addEventListener !== 'function') {
-              resolve();
-            }
-          })
-          .catch((error: any) => {
-            cleanup();
-            reject(error);
-          });
-      });
-    };
-  };
-
-  const fetchNextAudio = async () => {
-    const task = audioTasks.current.find(t => !t.isFetching && !t.isReady && !t.isFailed);
-    if (!task) return;
-
-    task.isFetching = true;
-    try {
-      const response = await fetch(ELEVENLABS_TTS_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: task.text, voiceId: ELEVENLABS_VOICE_ID }),
-      });
-
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`ElevenLabs TTS failed (${response.status}): ${errText}`);
-      }
-
-      const buffer = await response.arrayBuffer();
-      let binary = '';
-      const bytes = new Uint8Array(buffer);
-      const chunkSize = 0x8000;
-      for (let i = 0; i < bytes.length; i += chunkSize) {
-        binary += String.fromCharCode(...bytes.slice(i, i + chunkSize));
-      }
-      task.base64Audio = `data:audio/mpeg;base64,${btoa(binary)}`;
-      task.isReady = true;
-    } catch (error: any) {
-      console.warn('Server ElevenLabs TTS unavailable, trying Puter ElevenLabs:', error);
-      try {
-        const puterPlay = await createPuterElevenLabsPlayer(task.text);
-        if (!puterPlay) {
-          throw new Error('Puter ElevenLabs is unavailable in this browser');
-        }
-
-        task.puterPlay = puterPlay;
-        task.base64Audio = 'puter-elevenlabs';
-        task.isReady = true;
-        setTtsError(null);
-      } catch (puterError) {
-        console.warn('Puter ElevenLabs TTS unavailable:', puterError);
-        task.isFailed = true;
-        setTtsError('Không phát được audio: ElevenLabs server và Puter ElevenLabs đều đang lỗi.');
-      }
-      console.warn('ElevenLabs TTS unavailable:', error);
-      task.isFailed = true;
-      setTtsError('TTS đang lỗi ở cả ElevenLabs và fallback miễn phí, nên tạm thời chưa phát được âm thanh.');
-      setTtsError('Giọng ElevenLabs đang lỗi hoặc thiếu API key, nên tạm thời không phát được âm thanh.');
-    } finally {
-      task.isFetching = false;
-      playNextAudio();
-      fetchNextAudio();
-    }
-  };
-
-  const playNextAudio = async () => {
-    if (isPlayingAudio.current) return;
-    
-    const task = audioTasks.current[0];
-    if (!task) return;
-    
-    if (!task.isReady && !task.isFailed) return;
-    
-    audioTasks.current.shift();
-    
-    if (task.isReady && task.base64Audio) {
-      isPlayingAudio.current = true;
-      if (task.onStart) task.onStart();
-      try {
-        if (task.puterPlay) {
-          await task.puterPlay();
-        } else if (task.base64Audio.startsWith('data:audio/')) {
-          await new Promise<void>((resolve, reject) => {
-            const audio = new Audio(task.base64Audio);
-            audio.onended = () => resolve();
-            audio.onerror = () => reject(new Error('Failed to play ElevenLabs audio'));
-            audio.play().catch(reject);
-          });
-        }
-      } catch (e) {
-        console.error("Play error", e);
-      } finally {
-        if (task.onEnd) task.onEnd();
-        isPlayingAudio.current = false;
-        playNextAudio();
-      }
-    } else {
-      if (task.onEnd) task.onEnd();
-      playNextAudio();
-    }
-  };
-
   useEffect(() => {
     if (initializedRef.current) return;
     initializedRef.current = true;
@@ -552,20 +578,11 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
         setMessages([{
           id: 'system-reading',
           role: 'model',
-          text: '*Đang đọc đoạn thơ bằng giọng ElevenLabs (server/Puter)...*',
-          text: '*Đang đọc đoạn thơ bằng giọng ElevenLabs...*',
+          text: '*Đang khởi tạo phiên học và phân tích đoạn thơ...*',
         }]);
 
-        setPlayingAudioId('system-reading');
-        
-        // Read the entire poem in a single API call to save quota
-        addAudioTask(
-          poem, 
-          () => setReadingPoemLine(-1),
-          () => setReadingPoemLine(null)
-        );
+        setReadingPoemLine(null);
 
-        // Remove blocking wait to speed up chat initialization
         // 2. Start Chat
         setInitStage('ready');
         const chat = createChatSession(convoHistoryRef);
@@ -616,8 +633,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
   const sendChatMessage = async (userMessage: string) => {
     if (!chatSession) return;
     
-    stopAllAudio();
-    
+
     const newMessageId = Date.now().toString();
     setMessages((prev) => [
       ...prev,
@@ -673,25 +689,6 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
     const text = input.trim();
     setInput('');
     await sendChatMessage(text);
-  };
-
-  const playTTS = async (text: string, messageId: string) => {
-    if (playingAudioId === messageId) {
-      stopAllAudio();
-      setPlayingAudioId(null);
-      return;
-    }
-    
-    stopAllAudio();
-    setTtsError(null);
-    setPlayingAudioId(messageId);
-    
-    const sentences = text.match(/[^.?!]+[.?!]+(\s|$)/g) || [text];
-    sentences.forEach(s => {
-      if (s.trim()) addAudioTask(s.trim());
-    });
-    
-    setMessages(prev => prev.map(m => m.id === messageId ? { ...m, isAudioLoading: false } : m));
   };
 
   return (
@@ -777,7 +774,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                       </div>
                       <h4 className="text-xs font-bold text-[#7A7A5A] uppercase tracking-[0.2em] mb-3">Giọng điệu</h4>
                       <p className="text-2xl font-serif text-[#2c2c28] leading-tight italic">
-                        {summaryData?.tone || "Đang cập nhật..."}
+                        {effectiveSummaryData.tone}
                       </p>
                     </motion.div>
 
@@ -792,7 +789,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                       </div>
                       <h4 className="text-xs font-bold text-[#7A7A5A] uppercase tracking-[0.2em] mb-3">Nhịp thơ</h4>
                       <p className="text-2xl font-serif text-[#2c2c28] leading-tight italic">
-                        {summaryData?.rhythm || "Đang cập nhật..."}
+                        {effectiveSummaryData.rhythm}
                       </p>
                     </motion.div>
                   </div>
@@ -831,7 +828,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                     </div>
                     
                     <div className="space-y-6 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
-                      {summaryData?.highlights?.map((h, i) => (
+                      {effectiveSummaryData.highlights?.map((h, i) => (
                         <motion.div 
                           key={i}
                           initial={{ opacity: 0, y: 10 }}
@@ -848,9 +845,9 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                           </p>
                         </motion.div>
                       ))}
-                      {!summaryData?.highlights?.length && (
+                      {!effectiveSummaryData.highlights?.length && (
                         <div className="text-center py-12">
-                          <p className="text-[#7A7A5A] italic text-sm">Chưa có điểm sáng nào được ghi nhận.</p>
+                          <p className="text-[#7A7A5A] italic text-sm">Chưa có điểm sáng được xác nhận ở phần học; bạn có thể quay lại Bước 2 để bổ sung.</p>
                         </div>
                       )}
                     </div>
@@ -871,7 +868,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                   <div className="relative z-10 max-w-3xl mx-auto text-center">
                     <h4 className="text-xs font-bold text-white/60 uppercase tracking-[0.3em] mb-6">Cảm hứng chủ đạo & Nội dung chính</h4>
                     <p className="text-2xl md:text-3xl font-serif leading-relaxed italic">
-                      "{summaryData?.mainIdea || "Đang tổng hợp nội dung..."}"
+                      "{effectiveSummaryData.mainIdea}"
                     </p>
                   </div>
                 </motion.div>
@@ -895,6 +892,27 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                   </motion.div>
                 )}
 
+
+                {/* 4-Step Recap */}
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.9 }}
+                  className="max-w-5xl mx-auto mb-12"
+                >
+                  <h4 className="text-xs font-bold text-[#7A7A5A] uppercase tracking-[0.25em] mb-5 text-center">Tổng hợp 4 bước tìm & giải mã tín hiệu thẩm mĩ</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {stepRecap.map((item) => (
+                      <div key={item.step} className="rounded-2xl border border-[#e0e0d8] bg-white px-5 py-4 shadow-sm">
+                        <p className="text-[11px] uppercase tracking-[0.2em] text-[#7A7A5A] mb-1">Bước {item.step}</p>
+                        <p className="text-base font-semibold text-[#2c2c28] mb-1">{item.title}</p>
+                        <p className="text-sm text-[#5A5A40] mb-2">{item.status}</p>
+                        <p className="text-sm text-[#66664a] italic leading-relaxed">{item.note}</p>
+                      </div>
+                    ))}
+                  </div>
+                </motion.div>
+
                 {/* Action Buttons */}
                 <motion.div 
                   initial={{ opacity: 0, y: 20 }}
@@ -911,11 +929,11 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                   </button>
                   
                   <button
-                    onClick={() => window.print()}
+                    onClick={downloadMindMap}
                     className="px-10 py-5 bg-white text-[#5A5A40] border border-[#e0e0d8] rounded-full font-medium hover:bg-[#f5f5f0] transition-all duration-300 shadow-sm flex items-center gap-3"
                   >
                     <Feather className="w-5 h-5" />
-                    Lưu lại hành trình
+                    Tải sơ đồ mind map
                   </button>
                 </motion.div>
               </motion.div>
@@ -947,7 +965,19 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                   }`}>
                     {msg.role === 'model' && (
                       <div className="markdown-body text-[15px] leading-relaxed">
-                        <Markdown>{msg.text}</Markdown>
+                        <Markdown
+                          components={{
+                            p: ({ children }) => {
+                              const plain = Array.isArray(children) ? children.join('') : String(children ?? '');
+                              if (plain.includes('CÂU HỎI TRỌNG TÂM')) {
+                                return <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 font-semibold text-red-700">{children}</p>;
+                              }
+                              return <p>{children}</p>;
+                            },
+                          }}
+                        >
+                          {msg.text}
+                        </Markdown>
                       </div>
                     )}
                     {msg.role === 'user' && (
@@ -973,16 +1003,11 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex justify-center py-4">
                 <div className="bg-[#f5f5f0] text-[#5A5A40] px-4 py-2 rounded-full text-sm flex items-center gap-2 shadow-sm border border-[#e0e0d8]">
                   <Volume2 className="w-4 h-4 animate-pulse" />
-                  Đang đọc bài thơ với giọng: <span className="font-semibold">{poemTone}</span>
+                  Đang chuẩn bị phiên học: <span className="font-semibold">{poemTone}</span>
                 </div>
               </motion.div>
             )}
 
-            {ttsError && (
-              <div className="mx-4 mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                {ttsError}
-              </div>
-            )}
             {isLoading && initStage === 'ready' && (
               <motion.div 
                 initial={{ opacity: 0 }} 
