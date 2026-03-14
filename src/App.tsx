@@ -13,6 +13,14 @@ type AppErrorBoundaryState = {
 };
 
 class AppErrorBoundary extends React.Component<React.PropsWithChildren, AppErrorBoundaryState> {
+  constructor(props: React.PropsWithChildren) {
+    super(props);
+    this.state = {
+      hasError: false,
+      errorMessage: '',
+    };
+    this.handleReset = this.handleReset.bind(this);
+  }
   state: AppErrorBoundaryState = {
     hasError: false,
     errorMessage: '',
@@ -29,6 +37,9 @@ class AppErrorBoundary extends React.Component<React.PropsWithChildren, AppError
     console.error('App render error boundary caught:', error, errorInfo);
   }
 
+  handleReset() {
+    this.setState({ hasError: false, errorMessage: '' });
+  }
   private handleReset = () => {
     this.setState({ hasError: false, errorMessage: '' });
   };
