@@ -51,7 +51,7 @@ export function PoemInput({ onSubmit }: PoemInputProps) {
   const [author, setAuthor] = useState('');
   const [puterAuthState, setPuterAuthState] = useState<PuterAuthState>('unknown');
   const [puterAuthError, setPuterAuthError] = useState<string | null>(null);
-  const autoLoginAttemptedRef = useRef(false);
+  const loginTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -75,32 +75,45 @@ export function PoemInput({ onSubmit }: PoemInputProps) {
     setPuterAuthState('loading');
 
     try {
-      await requestPuterSignIn();
+      const loginPromise = requestPuterSignIn();
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        loginTimeoutRef.current = window.setTimeout(() => {
+          reject(new Error('Đăng nhập Puter đang mất quá lâu. Bạn có thể bỏ qua và bắt đầu học luôn.'));
+        }, 12000);
+      });
+
+      await Promise.race([loginPromise, timeoutPromise]);
+
+      if (loginTimeoutRef.current) {
+        clearTimeout(loginTimeoutRef.current);
+        loginTimeoutRef.current = null;
+      }
+
       const signedIn = await isPuterSignedIn();
       setPuterAuthState(signedIn ? 'signed-in' : 'signed-out');
       if (!signedIn) {
-        setPuterAuthError('Đăng nhập chưa hoàn tất, bạn thử lại giúp mình nhé.');
+        setPuterAuthError('Đăng nhập chưa hoàn tất. Bạn vẫn có thể bắt đầu học và hệ thống sẽ dùng API dự phòng.');
       }
     } catch (error: any) {
+      if (loginTimeoutRef.current) {
+        clearTimeout(loginTimeoutRef.current);
+        loginTimeoutRef.current = null;
+      }
       setPuterAuthState('signed-out');
-      setPuterAuthError(error?.message || 'Không thể đăng nhập Puter lúc này.');
+      setPuterAuthError(error?.message || 'Không thể đăng nhập Puter lúc này. Bạn vẫn có thể bắt đầu học.');
     }
   };
 
-
   useEffect(() => {
-    if (puterAuthState !== 'signed-out' || autoLoginAttemptedRef.current) return;
-    autoLoginAttemptedRef.current = true;
-    handlePuterLogin();
-  }, [puterAuthState]);
+    return () => {
+      if (loginTimeoutRef.current) {
+        clearTimeout(loginTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    if (puterAuthState !== 'signed-in') {
-      await handlePuterLogin();
-      return;
-    }
 
     if (poem.trim() && author.trim()) {
       onSubmit(poem, author);
@@ -122,7 +135,7 @@ export function PoemInput({ onSubmit }: PoemInputProps) {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-sm font-semibold text-[#2c2c28]">Đăng nhập Puter trước khi bắt đầu</p>
-              <p className="text-xs text-[#6f6f52]">Để dùng giọng đọc miễn phí và ổn định ngay từ đầu buổi học.</p>
+              <p className="text-xs text-[#6f6f52]">Khuyến nghị để dùng giọng đọc ổn định. Nếu lỗi đăng nhập, bạn vẫn có thể học bình thường.</p>
             </div>
             <button
               type="button"

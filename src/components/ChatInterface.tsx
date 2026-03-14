@@ -159,6 +159,15 @@ const STEP_TITLES = [
 ];
 
 const safeText = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
+const sanitizeSummaryText = (value: unknown): string =>
+  safeText(value)
+    .replace(/\[RHYTHM:[^\]]*\]/gi, '')
+    .replace(/\[HIGHLIGHT:[^\]]*\]/gi, '')
+    .replace(/\[CLEAR_MARKUP\]/gi, '')
+    .replace(/\[SUMMARY_MODE\]/gi, '')
+    .replace(/```json[\s\S]*?```/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 const escapeXml = (value: string): string =>
   value
     .replace(/&/g, '&amp;')
@@ -166,6 +175,8 @@ const escapeXml = (value: string): string =>
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const normalizeSummaryData = (raw: Partial<SummaryData> | null | undefined): SummaryData | null => {
   if (!raw) return null;
@@ -339,7 +350,6 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
     if (rhythmMatches.length > 0) {
       const lastRhythm = rhythmMatches[rhythmMatches.length - 1]?.[1] || '';
       const lines = lastRhythm.split(',').map((l) => l.trim()).filter(Boolean);
-      const lines = lastRhythm.split(',').map(l => l.trim()).filter(Boolean);
       setRhythmLines(lines);
     }
 
@@ -347,10 +357,6 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
     if (highlightMatches.length > 0) {
       const lastHighlight = highlightMatches[highlightMatches.length - 1]?.[1] || '';
       const words = lastHighlight.split(',').map((w) => w.trim()).filter(Boolean);
-      setHighlights(words);
-    }
-
-      const words = lastHighlight.split(',').map(w => w.trim()).filter(Boolean);
       setHighlights(words);
     }
     
@@ -392,11 +398,6 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
     const fallbackHighlights = highlights.map((word) => ({
       word: sanitizeSummaryText(word),
       analysis: `Đã phân tích vai trò của "${sanitizeSummaryText(word)}" trong mạch cảm xúc và hình tượng thơ.`,
-
-  const effectiveSummaryData = useMemo<SummaryData>(() => {
-    const fallbackHighlights = highlights.map((word) => ({
-      word,
-      analysis: 'Tín hiệu thẩm mĩ đã được xác nhận trong quá trình thảo luận.',
     }));
 
     const base = normalizeSummaryData(summaryData) || {
@@ -427,15 +428,6 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
           }))
         : fallbackHighlights,
       mainIdea: mainIdea || 'Chưa có kết luận nội dung chính rõ ràng từ phần tổng kết.',
-    return {
-      tone: base.tone || 'Chưa đủ dữ liệu giọng điệu (cần xác nhận rõ ở Bước 1).',
-      rhythm: base.rhythm || (rhythmLines.length ? rhythmLines.join(' | ') : 'Chưa có nhịp thơ được xác nhận bằng [RHYTHM].'),
-      highlights: base.highlights.length ? base.highlights : fallbackHighlights,
-      mainIdea: base.mainIdea || inferredMainIdea || 'Chưa có kết luận nội dung chính rõ ràng từ phần tổng kết.',
-      tone: base.tone || 'Đã phân tích trong hội thoại',
-      rhythm: base.rhythm || (rhythmLines.length ? rhythmLines.join(' | ') : 'Đang cập nhật từ phần trao đổi'),
-      highlights: base.highlights.length ? base.highlights : fallbackHighlights,
-      mainIdea: base.mainIdea || inferredMainIdea || 'Đã tổng hợp từ 4 bước tìm và giải mã tín hiệu thẩm mĩ.',
     };
   }, [summaryData, highlights, rhythmLines, summaryText]);
 
@@ -501,13 +493,6 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
       }
 
       const hasEvidence = !details[0].startsWith('Chưa đủ dữ liệu');
-    const modelTexts = messages.filter((m) => m.role === 'model').map((m) => m.text);
-
-    return STEP_TITLES.map((title, index) => {
-      const step = index + 1;
-      const related = [...modelTexts].reverse().find((text) => new RegExp(`BƯỚC\s*${step}`, 'i').test(text));
-      const evaluationMatch = related?.match(/ĐÁNH GIÁ\s*[:：]\s*([^\n]+)/i);
-      const questionMatch = related?.match(/CÂU HỎI TRỌNG TÂM\s*[:：]\s*([^\n]+)/i);
 
       return {
         step,
@@ -521,11 +506,6 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
       };
     });
   }, [messages, rhythmLines, effectiveSummaryData, summaryText]);
-        status: related ? 'Đã thực hiện' : 'Chưa ghi nhận',
-        note: evaluationMatch?.[1]?.trim() || questionMatch?.[1]?.trim() || 'Đang chờ cập nhật từ hội thoại.',
-      };
-    });
-  }, [messages]);
 
   const downloadMindMap = () => {
     const width = 1600;
@@ -551,8 +531,6 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
         y: 690,
         title: 'Thông điệp & tiến trình học',
         body: stepRecap.map((s) => `B${s.step} ${s.title}: ${s.details.join(' ')} Kết luận: ${s.note}`).join(' | '),
-        title: '4 bước đã học',
-        body: stepRecap.map((s) => `B${s.step} ${s.title}: ${s.status}. ${s.note}`).join(' | '),
         color: '#7c3aed',
       },
     ];
@@ -658,7 +636,9 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
       if (highlights.length > 0) {
         highlights.forEach(word => {
           if (!word) return;
-          const regex = new RegExp(`(${word})`, 'gi');
+          const safeWord = escapeRegExp(word.trim());
+          if (!safeWord) return;
+          const regex = new RegExp(`(${safeWord})`, 'gi');
           lineElements = lineElements.flatMap(part => {
             if (typeof part === 'string') {
               const splits = part.split(regex);
@@ -877,7 +857,6 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
         setMessages([{
           id: 'system-reading',
           role: 'model',
-          text: '*Đang khởi tạo phiên học và phân tích đoạn thơ...*',
           text: '*Đang đọc đoạn thơ bằng giọng ElevenLabs (server/Puter)...*',
         }]);
 
@@ -992,7 +971,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-[#f5f5f0] max-w-5xl mx-auto shadow-2xl overflow-hidden md:rounded-3xl md:h-[95vh] md:my-[2.5vh]">
+    <div className="flex flex-col min-h-dvh bg-[#f5f5f0] max-w-5xl mx-auto shadow-2xl overflow-hidden md:rounded-3xl md:h-[95vh] md:min-h-0 md:my-[2.5vh]">
       {/* Header */}
       <header className="bg-white px-6 py-4 border-b border-[#e0e0d8] flex items-center justify-between shrink-0 z-10">
         <div className="flex items-center gap-4">
@@ -1074,7 +1053,6 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                       </div>
                       <h4 className="text-xs font-bold text-[#7A7A5A] uppercase tracking-[0.2em] mb-3">Giọng điệu</h4>
                       <p className="text-2xl font-serif text-[#2c2c28] leading-tight italic">
-                        {effectiveSummaryData.tone}
                         {effectiveSummaryData.tone || "Đang cập nhật..."}
                       </p>
                     </motion.div>
@@ -1090,7 +1068,6 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                       </div>
                       <h4 className="text-xs font-bold text-[#7A7A5A] uppercase tracking-[0.2em] mb-3">Nhịp thơ</h4>
                       <p className="text-2xl font-serif text-[#2c2c28] leading-tight italic">
-                        {effectiveSummaryData.rhythm}
                         {effectiveSummaryData.rhythm || "Đang cập nhật..."}
                       </p>
                     </motion.div>
@@ -1170,7 +1147,6 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                   <div className="relative z-10 max-w-3xl mx-auto text-center">
                     <h4 className="text-xs font-bold text-white/60 uppercase tracking-[0.3em] mb-6">Cảm hứng chủ đạo & Nội dung chính</h4>
                     <p className="text-2xl md:text-3xl font-serif leading-relaxed italic">
-                      "{effectiveSummaryData.mainIdea}"
                       "{effectiveSummaryData.mainIdea || "Đang tổng hợp nội dung..."}"
                     </p>
                   </div>
