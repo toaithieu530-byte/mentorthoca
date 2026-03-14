@@ -247,6 +247,11 @@ const stripRuntimeMarkup = (text: string): string =>
     .replace(/```json[\s\S]*?```/g, '')
     .trim();
 
+const stripPrematureStep5 = (text: string): string =>
+  text.replace(/(?:^|\n)\s*(?:[-_*\s]*)?BƯỚC\s*5\s*:[\s\S]*$/i, '').trim();
+
+const buildDisplayText = (text: string): string => stripPrematureStep5(stripRuntimeMarkup(text));
+
 
 export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -402,6 +407,8 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
     if (text.includes('[SUMMARY_MODE]')) {
       const modelTexts = messages.filter((m) => m.role === 'model').map((m) => m.text || '');
       const completed = getCompletedStepSet([...modelTexts, text]);
+      const mentionsStep5 = /BƯỚC\s*5|TỔNG\s*KẾT/i.test(text);
+      const canOpenSummary = completed.size >= 4 && (text.includes('[SUMMARY_MODE]') || mentionsStep5);
       const canOpenSummary = text.includes('[SUMMARY_MODE]') || completed.size >= 3;
 
       if (!canOpenSummary) {
@@ -432,6 +439,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
         }
       }
 
+      const cleanText = buildDisplayText(text);
       const cleanText = stripRuntimeMarkup(text);
       setSummaryText(cleanText);
     }
@@ -741,6 +749,16 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
     fetchNextAudio();
   };
 
+  const replayPoemAudio = () => {
+    if (!poem?.trim()) return;
+    setTtsError(null);
+    addAudioTask(
+      poem,
+      () => setReadingPoemLine(-1),
+      () => setReadingPoemLine(null),
+    );
+  };
+
 
   const createPuterElevenLabsPlayer = async (text: string): Promise<(() => Promise<void>) | null> => {
     const puter = (window as any).puter;
@@ -933,6 +951,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
           const chunkText = chunk.text || '';
           fullText += chunkText;
           
+          const displayText = buildDisplayText(fullText);
           const displayText = stripRuntimeMarkup(fullText);
           setMessages((prev) => prev.map(m => m.id === firstMessageId ? { ...m, text: displayText } : m));
           
@@ -974,10 +993,16 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
     ]);
     setIsLoading(true);
 
+    const modelTexts = messages.filter((m) => m.role === 'model').map((m) => m.text || '');
+    const completedSteps = getCompletedStepSet(modelTexts);
+    const nextStep = Math.min(4, Math.max(1, completedSteps.size + 1));
+    const guidedMessage = `${userMessage}\n\n[ĐIỀU HƯỚNG TỪ ỨNG DỤNG - BẮT BUỘC]\n- Chỉ phản hồi đúng BƯỚC ${nextStep}.\n- Không nhảy cóc bước.\n- Không chèn BƯỚC 5/TỔNG KẾT trước khi hoàn tất đủ 4 bước.`;
+
+    let fullText = '';
+    const modelMessageId = (Date.now() + 1).toString();
     let fullText = '';
     try {
-      const responseStream = chatSession.sendMessageStream({ message: userMessage });
-      const modelMessageId = (Date.now() + 1).toString();
+      const responseStream = chatSession.sendMessageStream({ message: guidedMessage });
       
       setMessages((prev) => [
         ...prev,
@@ -990,6 +1015,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
         const chunkText = chunk.text || '';
         fullText += chunkText;
 
+        const displayText = buildDisplayText(fullText);
         const displayText = stripRuntimeMarkup(fullText);
         
         setMessages((prev) => prev.map(m => m.id === modelMessageId ? { ...m, text: displayText } : m));
@@ -998,7 +1024,9 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
       }
       
     } catch (error: any) {
-      console.error('Failed to send message:', error);
+      console.error('Failed to send message:', error);       if (fullText.trim()) {
+        parseMarkup(fullText);
+        setMessages((prev) => prev.map(m => m.id === modelMessageId ? { ...m, text: buildDisplayText(fullText) } : m));
       if (fullText.includes('[SUMMARY_MODE]')) {
         parseMarkup(fullText);
         setIsLoading(false);
@@ -1045,6 +1073,13 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={replayPoemAudio}
+            className="p-2 hover:bg-[#f5f5f0] rounded-full transition-colors text-[#5A5A40]"
+            title="Nghe lại đoạn thơ"
+          >
+            <Volume2 className="w-5 h-5" />
+          </button>
           <button 
             onClick={() => setShowMobilePoem(!showMobilePoem)}
             className="md:hidden p-2 hover:bg-[#f5f5f0] rounded-full transition-colors text-[#5A5A40]"
