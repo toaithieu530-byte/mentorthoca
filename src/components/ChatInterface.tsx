@@ -159,6 +159,15 @@ const STEP_TITLES = [
 ];
 
 const safeText = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
+const sanitizeSummaryText = (value: unknown): string =>
+  safeText(value)
+    .replace(/\[RHYTHM:[^\]]*\]/gi, '')
+    .replace(/\[HIGHLIGHT:[^\]]*\]/gi, '')
+    .replace(/\[CLEAR_MARKUP\]/gi, '')
+    .replace(/\[SUMMARY_MODE\]/gi, '')
+    .replace(/```json[\s\S]*?```/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 const escapeXml = (value: string): string =>
   value
     .replace(/&/g, '&amp;')
@@ -962,7 +971,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-[#f5f5f0] max-w-5xl mx-auto shadow-2xl overflow-hidden md:rounded-3xl md:h-[95vh] md:my-[2.5vh]">
+    <div className="flex flex-col min-h-dvh bg-[#f5f5f0] max-w-5xl mx-auto shadow-2xl overflow-hidden md:rounded-3xl md:h-[95vh] md:min-h-0 md:my-[2.5vh]">
       {/* Header */}
       <header className="bg-white px-6 py-4 border-b border-[#e0e0d8] flex items-center justify-between shrink-0 z-10">
         <div className="flex items-center gap-4">
