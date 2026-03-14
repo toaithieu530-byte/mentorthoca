@@ -14,6 +14,9 @@ GIỌNG ĐIỆU & XƯNG HÔ (BẮT BUỘC):
 MỤC TIÊU PHẢN HỒI:
 - Luôn giúp học sinh tự nghĩ ra đáp án trước, không làm hộ ngay.
 - Luôn chấm mức độ đúng/sai/thiếu của câu trả lời học sinh một cách cân bằng.
+MỤC TIÊU PHẢN HỒI:
+- Luôn giúp học sinh tự nghĩ ra đáp án trước, không làm hộ ngay.
+- Luôn chấm mức độ đúng/sai/thiếu của câu trả lời học sinh.
 - Nếu học sinh sai hoặc thiếu: gợi ý tăng dần tối đa 3 lượt. Sau lượt thứ 3 vẫn chưa đạt thì mới đưa đáp án mẫu ngắn gọn.
 
 QUY TẮC BẮT BUỘC VỀ ĐỊNH DẠNG (mọi phản hồi):
@@ -336,6 +339,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
     if (rhythmMatches.length > 0) {
       const lastRhythm = rhythmMatches[rhythmMatches.length - 1]?.[1] || '';
       const lines = lastRhythm.split(',').map((l) => l.trim()).filter(Boolean);
+      const lines = lastRhythm.split(',').map(l => l.trim()).filter(Boolean);
       setRhythmLines(lines);
     }
 
@@ -346,6 +350,10 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
       setHighlights(words);
     }
 
+      const words = lastHighlight.split(',').map(w => w.trim()).filter(Boolean);
+      setHighlights(words);
+    }
+    
     if (text.includes('[SUMMARY_MODE]')) {
       const modelTexts = messages.filter((m) => m.role === 'model').map((m) => m.text || '');
       const completed = getCompletedStepSet([...modelTexts, text]);
@@ -384,6 +392,11 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
     const fallbackHighlights = highlights.map((word) => ({
       word: sanitizeSummaryText(word),
       analysis: `Đã phân tích vai trò của "${sanitizeSummaryText(word)}" trong mạch cảm xúc và hình tượng thơ.`,
+
+  const effectiveSummaryData = useMemo<SummaryData>(() => {
+    const fallbackHighlights = highlights.map((word) => ({
+      word,
+      analysis: 'Tín hiệu thẩm mĩ đã được xác nhận trong quá trình thảo luận.',
     }));
 
     const base = normalizeSummaryData(summaryData) || {
@@ -414,6 +427,15 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
           }))
         : fallbackHighlights,
       mainIdea: mainIdea || 'Chưa có kết luận nội dung chính rõ ràng từ phần tổng kết.',
+    return {
+      tone: base.tone || 'Chưa đủ dữ liệu giọng điệu (cần xác nhận rõ ở Bước 1).',
+      rhythm: base.rhythm || (rhythmLines.length ? rhythmLines.join(' | ') : 'Chưa có nhịp thơ được xác nhận bằng [RHYTHM].'),
+      highlights: base.highlights.length ? base.highlights : fallbackHighlights,
+      mainIdea: base.mainIdea || inferredMainIdea || 'Chưa có kết luận nội dung chính rõ ràng từ phần tổng kết.',
+      tone: base.tone || 'Đã phân tích trong hội thoại',
+      rhythm: base.rhythm || (rhythmLines.length ? rhythmLines.join(' | ') : 'Đang cập nhật từ phần trao đổi'),
+      highlights: base.highlights.length ? base.highlights : fallbackHighlights,
+      mainIdea: base.mainIdea || inferredMainIdea || 'Đã tổng hợp từ 4 bước tìm và giải mã tín hiệu thẩm mĩ.',
     };
   }, [summaryData, highlights, rhythmLines, summaryText]);
 
@@ -479,6 +501,13 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
       }
 
       const hasEvidence = !details[0].startsWith('Chưa đủ dữ liệu');
+    const modelTexts = messages.filter((m) => m.role === 'model').map((m) => m.text);
+
+    return STEP_TITLES.map((title, index) => {
+      const step = index + 1;
+      const related = [...modelTexts].reverse().find((text) => new RegExp(`BƯỚC\s*${step}`, 'i').test(text));
+      const evaluationMatch = related?.match(/ĐÁNH GIÁ\s*[:：]\s*([^\n]+)/i);
+      const questionMatch = related?.match(/CÂU HỎI TRỌNG TÂM\s*[:：]\s*([^\n]+)/i);
 
       return {
         step,
@@ -492,6 +521,11 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
       };
     });
   }, [messages, rhythmLines, effectiveSummaryData, summaryText]);
+        status: related ? 'Đã thực hiện' : 'Chưa ghi nhận',
+        note: evaluationMatch?.[1]?.trim() || questionMatch?.[1]?.trim() || 'Đang chờ cập nhật từ hội thoại.',
+      };
+    });
+  }, [messages]);
 
   const downloadMindMap = () => {
     const width = 1600;
@@ -517,6 +551,8 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
         y: 690,
         title: 'Thông điệp & tiến trình học',
         body: stepRecap.map((s) => `B${s.step} ${s.title}: ${s.details.join(' ')} Kết luận: ${s.note}`).join(' | '),
+        title: '4 bước đã học',
+        body: stepRecap.map((s) => `B${s.step} ${s.title}: ${s.status}. ${s.note}`).join(' | '),
         color: '#7c3aed',
       },
     ];
@@ -667,6 +703,168 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
     });
   };
 
+  const audioTasks = useRef<AudioTask[]>([]);
+  const isPlayingAudio = useRef(false);
+
+  const stopAllAudio = () => {
+    audioTasks.current = [];
+    isPlayingAudio.current = false;
+  };
+
+  const addAudioTask = (text: string, onStart?: () => void, onEnd?: () => void) => {
+    const task: AudioTask = { text, isFetching: false, isReady: false, isFailed: false, onStart, onEnd };
+    audioTasks.current.push(task);
+    fetchNextAudio();
+  };
+
+
+  const createPuterElevenLabsPlayer = async (text: string): Promise<(() => Promise<void>) | null> => {
+    const puter = (window as any).puter;
+    if (!puter?.ai?.txt2speech) return null;
+
+    const audioLike = await puter.ai.txt2speech(text, {
+      provider: 'elevenlabs',
+      voice: PUTER_ELEVENLABS_VOICE_ID,
+      model: 'eleven_multilingual_v2',
+      output_format: 'mp3_44100_128',
+    });
+
+    return async () => {
+      if (audioLike?.pause) {
+        try {
+          audioLike.currentTime = 0;
+        } catch {}
+      }
+
+      await new Promise<void>((resolve, reject) => {
+        if (!audioLike || typeof audioLike.play !== 'function') {
+          reject(new Error('Puter txt2speech returned unsupported audio object'));
+          return;
+        }
+
+        const cleanup = () => {
+          if (typeof audioLike.removeEventListener === 'function') {
+            audioLike.removeEventListener('ended', onEnded);
+            audioLike.removeEventListener('error', onError);
+          }
+        };
+
+        const onEnded = () => {
+          cleanup();
+          resolve();
+        };
+
+        const onError = () => {
+          cleanup();
+          reject(new Error('Puter ElevenLabs playback failed'));
+        };
+
+        if (typeof audioLike.addEventListener === 'function') {
+          audioLike.addEventListener('ended', onEnded);
+          audioLike.addEventListener('error', onError);
+        }
+
+        Promise.resolve(audioLike.play())
+          .then(() => {
+            if (typeof audioLike.addEventListener !== 'function') {
+              resolve();
+            }
+          })
+          .catch((error: any) => {
+            cleanup();
+            reject(error);
+          });
+      });
+    };
+  };
+
+  const fetchNextAudio = async () => {
+    const task = audioTasks.current.find(t => !t.isFetching && !t.isReady && !t.isFailed);
+    if (!task) return;
+
+    task.isFetching = true;
+    try {
+      const response = await fetch(ELEVENLABS_TTS_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: task.text, voiceId: ELEVENLABS_VOICE_ID }),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`ElevenLabs TTS failed (${response.status}): ${errText}`);
+      }
+
+      const buffer = await response.arrayBuffer();
+      let binary = '';
+      const bytes = new Uint8Array(buffer);
+      const chunkSize = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        binary += String.fromCharCode(...bytes.slice(i, i + chunkSize));
+      }
+      task.base64Audio = `data:audio/mpeg;base64,${btoa(binary)}`;
+      task.isReady = true;
+    } catch (error: any) {
+      console.warn('Server ElevenLabs TTS unavailable, trying Puter ElevenLabs:', error);
+      try {
+        const puterPlay = await createPuterElevenLabsPlayer(task.text);
+        if (!puterPlay) {
+          throw new Error('Puter ElevenLabs is unavailable in this browser');
+        }
+
+        task.puterPlay = puterPlay;
+        task.base64Audio = 'puter-elevenlabs';
+        task.isReady = true;
+        setTtsError(null);
+      } catch (puterError) {
+        console.warn('Puter ElevenLabs TTS unavailable:', puterError);
+        task.isFailed = true;
+        setTtsError('Không phát được audio: ElevenLabs server và Puter ElevenLabs đều đang lỗi.');
+      }
+    } finally {
+      task.isFetching = false;
+      playNextAudio();
+      fetchNextAudio();
+    }
+  };
+
+  const playNextAudio = async () => {
+    if (isPlayingAudio.current) return;
+    
+    const task = audioTasks.current[0];
+    if (!task) return;
+    
+    if (!task.isReady && !task.isFailed) return;
+    
+    audioTasks.current.shift();
+    
+    if (task.isReady && task.base64Audio) {
+      isPlayingAudio.current = true;
+      if (task.onStart) task.onStart();
+      try {
+        if (task.puterPlay) {
+          await task.puterPlay();
+        } else if (task.base64Audio.startsWith('data:audio/')) {
+          await new Promise<void>((resolve, reject) => {
+            const audio = new Audio(task.base64Audio);
+            audio.onended = () => resolve();
+            audio.onerror = () => reject(new Error('Failed to play ElevenLabs audio'));
+            audio.play().catch(reject);
+          });
+        }
+      } catch (e) {
+        console.error("Play error", e);
+      } finally {
+        if (task.onEnd) task.onEnd();
+        isPlayingAudio.current = false;
+        playNextAudio();
+      }
+    } else {
+      if (task.onEnd) task.onEnd();
+      playNextAudio();
+    }
+  };
+
   useEffect(() => {
     if (initializedRef.current) return;
     initializedRef.current = true;
@@ -680,6 +878,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
           id: 'system-reading',
           role: 'model',
           text: '*Đang khởi tạo phiên học và phân tích đoạn thơ...*',
+          text: '*Đang đọc đoạn thơ bằng giọng ElevenLabs (server/Puter)...*',
         }]);
 
         setReadingPoemLine(null);
@@ -876,6 +1075,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                       <h4 className="text-xs font-bold text-[#7A7A5A] uppercase tracking-[0.2em] mb-3">Giọng điệu</h4>
                       <p className="text-2xl font-serif text-[#2c2c28] leading-tight italic">
                         {effectiveSummaryData.tone}
+                        {effectiveSummaryData.tone || "Đang cập nhật..."}
                       </p>
                     </motion.div>
 
@@ -891,6 +1091,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                       <h4 className="text-xs font-bold text-[#7A7A5A] uppercase tracking-[0.2em] mb-3">Nhịp thơ</h4>
                       <p className="text-2xl font-serif text-[#2c2c28] leading-tight italic">
                         {effectiveSummaryData.rhythm}
+                        {effectiveSummaryData.rhythm || "Đang cập nhật..."}
                       </p>
                     </motion.div>
                   </div>
@@ -970,6 +1171,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                     <h4 className="text-xs font-bold text-white/60 uppercase tracking-[0.3em] mb-6">Cảm hứng chủ đạo & Nội dung chính</h4>
                     <p className="text-2xl md:text-3xl font-serif leading-relaxed italic">
                       "{effectiveSummaryData.mainIdea}"
+                      "{effectiveSummaryData.mainIdea || "Đang tổng hợp nội dung..."}"
                     </p>
                   </div>
                 </motion.div>
@@ -1017,6 +1219,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                             ))}
                           </ul>
                         </div>
+                        <p className="text-sm text-[#66664a] italic leading-relaxed">{item.note}</p>
                       </div>
                     ))}
                   </div>
