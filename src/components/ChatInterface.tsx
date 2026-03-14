@@ -119,6 +119,7 @@ interface StepRecap {
   title: string;
   status: string;
   note: string;
+  details: string[];
 }
 
 interface ChatInterfaceProps {
@@ -178,6 +179,23 @@ const normalizeSummaryData = (raw: Partial<SummaryData> | null | undefined): Sum
       : [],
     mainIdea: safeText(raw.mainIdea),
   };
+};
+
+const pickUnique = (items: string[]): string[] => {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const item of items.map((i) => i.trim()).filter(Boolean)) {
+    const key = item.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push(item);
+    }
+  }
+  return result;
+};
+
+const extractKeywords = (text: string, keywords: string[]): string[] => {
+  return keywords.filter((keyword) => new RegExp(`\\b${keyword}\\b`, 'i').test(text));
 };
 
 
@@ -386,6 +404,59 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
 
     return STEP_TITLES.map((title, index) => {
       const step = index + 1;
+      const related = [...modelTexts].reverse().find((text) => new RegExp(`BƯỚC\s*${step}`, 'i').test(text)) || '';
+      const evaluationMatch = related.match(/ĐÁNH GIÁ\s*[:：]\s*([^\n]+)/i);
+      const questionMatch = related.match(/CÂU HỎI TRỌNG TÂM\s*[:：]\s*([^\n]+)/i);
+
+      let details: string[] = [];
+
+      if (step === 1) {
+        const rhythmDetail = rhythmLines.length
+          ? [`Đã xác nhận nhịp thơ: ${rhythmLines.slice(0, 2).join(' | ')}${rhythmLines.length > 2 ? ' ...' : ''}.`]
+          : [];
+        const toneDetail = effectiveSummaryData.tone && !effectiveSummaryData.tone.startsWith('Chưa đủ dữ liệu')
+          ? [`Đã nhận diện giọng điệu: ${effectiveSummaryData.tone}.`]
+          : [];
+        details = [...toneDetail, ...rhythmDetail];
+      }
+
+      if (step === 2) {
+        details = effectiveSummaryData.highlights.length
+          ? [
+              `Đã tìm tín hiệu thẩm mĩ: ${effectiveSummaryData.highlights.map((h) => h.word).slice(0, 6).join(', ')}${effectiveSummaryData.highlights.length > 6 ? ' ...' : ''}.`,
+              'Đã làm nổi bật trực tiếp các từ/cụm từ trên văn bản thơ.',
+            ]
+          : [];
+      }
+
+      if (step === 3) {
+        const categories = extractKeywords(
+          `${related} ${summaryText}`,
+          ['ẩn dụ', 'so sánh', 'điệp', 'hoán dụ', 'đảo ngữ', 'nhịp', 'vần', 'cú pháp'],
+        );
+        details = categories.length
+          ? [
+              `Đã phân dạng tín hiệu theo nhóm: ${pickUnique(categories).join(', ')}.`,
+              'Đã đối chiếu tín hiệu vào nhóm thể loại, từ ngữ, tu từ hoặc cú pháp.',
+            ]
+          : [];
+      }
+
+      if (step === 4) {
+        const idea = effectiveSummaryData.mainIdea;
+        details = idea && !idea.startsWith('Chưa có kết luận')
+          ? [
+              `Đã giải mã ý nghĩa trung tâm: ${idea}.`,
+              'Đã liên hệ hiệu quả nghệ thuật của tín hiệu với cảm xúc/chủ đề bài thơ.',
+            ]
+          : [];
+      }
+
+      if (!details.length) {
+        details = ['Chưa đủ dữ liệu cụ thể; bạn có thể bổ sung thêm câu trả lời ở bước này để hoàn thiện bảng tổng kết.'];
+      }
+
+      const hasEvidence = details[0] && !details[0].startsWith('Chưa đủ dữ liệu');
       const related = [...modelTexts].reverse().find((text) => new RegExp(`BƯỚC\s*${step}`, 'i').test(text));
       const evaluationMatch = related?.match(/ĐÁNH GIÁ\s*[:：]\s*([^\n]+)/i);
       const questionMatch = related?.match(/CÂU HỎI TRỌNG TÂM\s*[:：]\s*([^\n]+)/i);
@@ -393,6 +464,15 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
       return {
         step,
         title,
+        status: hasEvidence ? 'Đã thực hiện' : 'Cần bổ sung',
+        note:
+          evaluationMatch?.[1]?.trim() ||
+          questionMatch?.[1]?.trim() ||
+          (hasEvidence ? 'Đã có bằng chứng từ quá trình học.' : 'Đang chờ cập nhật từ hội thoại.'),
+        details,
+      };
+    });
+  }, [messages, rhythmLines, effectiveSummaryData, summaryText]);
         status: related ? 'Đã thực hiện' : 'Chưa ghi nhận',
         note: evaluationMatch?.[1]?.trim() || questionMatch?.[1]?.trim() || 'Đang chờ cập nhật từ hội thoại.',
       };
@@ -1080,6 +1160,15 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                         <p className="text-[11px] uppercase tracking-[0.2em] text-[#7A7A5A] mb-1">Bước {item.step}</p>
                         <p className="text-base font-semibold text-[#2c2c28] mb-1">{item.title}</p>
                         <p className="text-sm text-[#5A5A40] mb-2">{item.status}</p>
+                        <p className="text-sm text-[#66664a] italic leading-relaxed mb-3">{item.note}</p>
+                        <div className="rounded-xl bg-[#fafaf6] border border-[#ececdf] px-3 py-2">
+                          <p className="text-[11px] uppercase tracking-[0.16em] text-[#7A7A5A] mb-1">Các việc đã làm</p>
+                          <ul className="list-disc pl-4 space-y-1 text-sm text-[#4d4d36]">
+                            {item.details.map((detail, idx) => (
+                              <li key={idx}>{detail}</li>
+                            ))}
+                          </ul>
+                        </div>
                         <p className="text-sm text-[#66664a] italic leading-relaxed">{item.note}</p>
                       </div>
                     ))}
