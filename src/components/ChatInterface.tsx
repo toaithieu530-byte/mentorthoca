@@ -105,6 +105,17 @@ interface Message {
   isAudioLoading?: boolean;
 }
 
+interface AudioTask {
+  text: string;
+  base64Audio?: string;
+  isFetching: boolean;
+  isReady: boolean;
+  isFailed: boolean;
+  puterPlay?: () => Promise<void>;
+  onStart?: () => void;
+  onEnd?: () => void;
+}
+
 
 interface SummaryData {
   tone: string;
@@ -150,6 +161,9 @@ const TEXT_API_ENDPOINTS = TEXT_API_BASE
     ? ['/api/chat', DEFAULT_TEXT_ENDPOINT]
     : [DEFAULT_TEXT_ENDPOINT, '/api/chat'];
 const TEXT_MODELS = ['openai', 'openai-large'];
+const ELEVENLABS_TTS_ENDPOINT = '/api/tts';
+const ELEVENLABS_VOICE_ID = (import.meta as any).env?.VITE_ELEVENLABS_VOICE_ID as string | undefined;
+const PUTER_ELEVENLABS_VOICE_ID = 'jdlxsPOZOHdGEfcItXVu';
 const USE_PUTER_GEMINI = (import.meta as any).env?.VITE_USE_PUTER_GEMINI !== 'false';
 const STEP_TITLES = [
   'Tri giác đoạn thơ',
@@ -209,6 +223,30 @@ const extractKeywords = (text: string, keywords: string[]): string[] => {
   return keywords.filter((keyword) => new RegExp(`\\b${keyword}\\b`, 'i').test(text));
 };
 
+const getCompletedStepSet = (texts: string[]): Set<number> => {
+  const completed = new Set<number>();
+  const joined = texts.join('\n').toUpperCase();
+  for (let step = 1; step <= 4; step++) {
+    const patterns = [
+      new RegExp(`###\\s*BƯỚC\\s*${step}`),
+      new RegExp(`BƯỚC\\s*${step}`),
+    ];
+    if (patterns.some((p) => p.test(joined))) {
+      completed.add(step);
+    }
+  }
+  return completed;
+};
+
+const stripRuntimeMarkup = (text: string): string =>
+  text
+    .replace(/\[SUMMARY_MODE\]/g, '')
+    .replace(/\[RHYTHM:.*?\]/g, '')
+    .replace(/\[HIGHLIGHT:.*?\]/g, '')
+    .replace(/\[CLEAR_MARKUP\]/g, '')
+    .replace(/```json[\s\S]*?```/g, '')
+    .trim();
+
 
 export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -229,6 +267,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
   const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
   const [rhythmLines, setRhythmLines] = useState<string[]>([]);
   const [summaryBlockedReason, setSummaryBlockedReason] = useState<string | null>(null);
+  const [ttsError, setTtsError] = useState<string | null>(null);
   
   const initializedRef = useRef(false);
   const convoHistoryRef = useRef<PollinationsMessage[]>([]);
@@ -363,7 +402,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
     if (text.includes('[SUMMARY_MODE]')) {
       const modelTexts = messages.filter((m) => m.role === 'model').map((m) => m.text || '');
       const completed = getCompletedStepSet([...modelTexts, text]);
-      const canOpenSummary = completed.size >= 4;
+      const canOpenSummary = text.includes('[SUMMARY_MODE]') || completed.size >= 3;
 
       if (!canOpenSummary) {
         setSummaryBlockedReason('Bạn và mình cần học đủ 4 bước trước khi mở màn hình tổng kết.');
@@ -381,14 +420,19 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
         } catch (e) {
           console.error('Failed to parse summary JSON', e);
         }
+      } else {
+        const looseObjectMatch = text.match(/\{[\s\S]*\}/);
+        if (looseObjectMatch) {
+          try {
+            const parsed = JSON.parse(looseObjectMatch[0]);
+            setSummaryData(normalizeSummaryData(parsed));
+          } catch {
+            // keep summary mode even if JSON is malformed
+          }
+        }
       }
 
-      const cleanText = text
-        .replace(/\[SUMMARY_MODE\]/g, '')
-        .replace(/\[RHYTHM:.*?\]/g, '')
-        .replace(/\[HIGHLIGHT:.*?\]/g, '')
-        .replace(/```json[\s\S]*?```/g, '')
-        .trim();
+      const cleanText = stripRuntimeMarkup(text);
       setSummaryText(cleanText);
     }
   };
@@ -861,6 +905,13 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
         }]);
 
         setReadingPoemLine(null);
+        setTtsError(null);
+
+        addAudioTask(
+          poem,
+          () => setReadingPoemLine(-1),
+          () => setReadingPoemLine(null),
+        );
 
         // 2. Start Chat
         setInitStage('ready');
@@ -882,7 +933,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
           const chunkText = chunk.text || '';
           fullText += chunkText;
           
-          const displayText = fullText.replace(/\[RHYTHM:.*?\]/g, '').replace(/\[HIGHLIGHT:.*?\]/g, '').replace(/\[CLEAR_MARKUP\]/g, '').trim();
+          const displayText = stripRuntimeMarkup(fullText);
           setMessages((prev) => prev.map(m => m.id === firstMessageId ? { ...m, text: displayText } : m));
           
           parseMarkup(fullText);
@@ -896,11 +947,14 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
         } else if (error?.message?.includes('Failed to fetch') || error?.message?.includes('NetworkError')) {
           errorMessage = 'Không thể kết nối tới máy chủ AI (có thể do chặn mạng/CORS ở môi trường deploy). Vui lòng kiểm tra mạng hoặc đổi endpoint TEXT_API.';
         }
-        setMessages([{
-          id: Date.now().toString(),
-          role: 'model',
-          text: errorMessage,
-        }]);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: Date.now().toString(),
+            role: 'model',
+            text: errorMessage,
+          },
+        ]);
       } finally {
         setIsLoading(false);
       }
@@ -920,6 +974,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
     ]);
     setIsLoading(true);
 
+    let fullText = '';
     try {
       const responseStream = chatSession.sendMessageStream({ message: userMessage });
       const modelMessageId = (Date.now() + 1).toString();
@@ -931,13 +986,11 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
       
       setIsLoading(false);
       
-      let fullText = '';
-      
       for await (const chunk of responseStream) {
         const chunkText = chunk.text || '';
         fullText += chunkText;
-        
-        const displayText = fullText.replace(/\[RHYTHM:.*?\]/g, '').replace(/\[HIGHLIGHT:.*?\]/g, '').replace(/\[CLEAR_MARKUP\]/g, '').trim();
+
+        const displayText = stripRuntimeMarkup(fullText);
         
         setMessages((prev) => prev.map(m => m.id === modelMessageId ? { ...m, text: displayText } : m));
         
@@ -946,6 +999,11 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
       
     } catch (error: any) {
       console.error('Failed to send message:', error);
+      if (fullText.includes('[SUMMARY_MODE]')) {
+        parseMarkup(fullText);
+        setIsLoading(false);
+        return;
+      }
       let errorMessage = 'Xin lỗi, tôi không thể trả lời lúc này. Vui lòng thử lại.';
       if (error?.status === 429 || error?.message?.includes('429') || error?.message?.includes('quota')) {
         errorMessage = 'Hệ thống đang quá tải hoặc hết hạn mức API. Vui lòng thử lại sau ít phút.';
@@ -1299,6 +1357,12 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
             {summaryBlockedReason && (
               <div className="mx-auto max-w-2xl rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                 {summaryBlockedReason}
+              </div>
+            )}
+
+            {ttsError && (
+              <div className="mx-auto max-w-2xl rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 text-xs text-orange-700">
+                {ttsError}
               </div>
             )}
 
