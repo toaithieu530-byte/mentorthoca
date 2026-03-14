@@ -217,6 +217,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
   const [summaryText, setSummaryText] = useState('');
   const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
   const [rhythmLines, setRhythmLines] = useState<string[]>([]);
+  const [summaryBlockedReason, setSummaryBlockedReason] = useState<string | null>(null);
   
   const initializedRef = useRef(false);
   const convoHistoryRef = useRef<PollinationsMessage[]>([]);
@@ -337,6 +338,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
     const rhythmMatches = Array.from(text.matchAll(/\[RHYTHM:\s*(.*?)\]/g));
     if (rhythmMatches.length > 0) {
       const lastRhythm = rhythmMatches[rhythmMatches.length - 1]?.[1] || '';
+      const lines = lastRhythm.split(',').map((l) => l.trim()).filter(Boolean);
       const lines = lastRhythm.split(',').map(l => l.trim()).filter(Boolean);
       setRhythmLines(lines);
     }
@@ -344,30 +346,52 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
     const highlightMatches = Array.from(text.matchAll(/\[HIGHLIGHT:\s*(.*?)\]/g));
     if (highlightMatches.length > 0) {
       const lastHighlight = highlightMatches[highlightMatches.length - 1]?.[1] || '';
+      const words = lastHighlight.split(',').map((w) => w.trim()).filter(Boolean);
+      setHighlights(words);
+    }
+
       const words = lastHighlight.split(',').map(w => w.trim()).filter(Boolean);
       setHighlights(words);
     }
     
     if (text.includes('[SUMMARY_MODE]')) {
+      const modelTexts = messages.filter((m) => m.role === 'model').map((m) => m.text || '');
+      const completed = getCompletedStepSet([...modelTexts, text]);
+      const canOpenSummary = completed.size >= 4;
+
+      if (!canOpenSummary) {
+        setSummaryBlockedReason('Bạn và mình cần học đủ 4 bước trước khi mở màn hình tổng kết.');
+        return;
+      }
+
+      setSummaryBlockedReason(null);
       setIsSummaryMode(true);
-      
+
       const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
       if (jsonMatch) {
         try {
           const parsed = JSON.parse(jsonMatch[1]);
           setSummaryData(normalizeSummaryData(parsed));
         } catch (e) {
-          console.error("Failed to parse summary JSON", e);
+          console.error('Failed to parse summary JSON', e);
         }
       }
-      
-      // Extract the summary text (everything before the tag)
-      const cleanText = text.replace(/\[SUMMARY_MODE\]/g, '').replace(/\[RHYTHM:.*?\]/g, '').replace(/\[HIGHLIGHT:.*?\]/g, '').replace(/```json[\s\S]*?```/g, '').trim();
+
+      const cleanText = text
+        .replace(/\[SUMMARY_MODE\]/g, '')
+        .replace(/\[RHYTHM:.*?\]/g, '')
+        .replace(/\[HIGHLIGHT:.*?\]/g, '')
+        .replace(/```json[\s\S]*?```/g, '')
+        .trim();
       setSummaryText(cleanText);
     }
   };
 
 
+  const effectiveSummaryData = useMemo<SummaryData>(() => {
+    const fallbackHighlights = highlights.map((word) => ({
+      word: sanitizeSummaryText(word),
+      analysis: `Đã phân tích vai trò của "${sanitizeSummaryText(word)}" trong mạch cảm xúc và hình tượng thơ.`,
 
   const effectiveSummaryData = useMemo<SummaryData>(() => {
     const fallbackHighlights = highlights.map((word) => ({
@@ -387,6 +411,22 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
       .map((line) => line.trim())
       .find((line) => line && !line.startsWith('###') && !line.startsWith('🔴') && !line.startsWith('ĐÁNH GIÁ')) || '';
 
+    const tone = sanitizeSummaryText(base.tone);
+    const rhythm = sanitizeSummaryText(base.rhythm || (rhythmLines.length ? rhythmLines.join(' / ') : ''));
+    const mainIdea = sanitizeSummaryText(base.mainIdea || inferredMainIdea);
+
+    return {
+      tone: tone || 'Chưa đủ dữ liệu giọng điệu (cần xác nhận rõ ở Bước 1).',
+      rhythm: rhythm || 'Chưa có nhịp thơ được xác nhận bằng [RHYTHM].',
+      highlights: base.highlights.length
+        ? base.highlights.map((h) => ({
+            word: sanitizeSummaryText(h.word),
+            analysis:
+              sanitizeSummaryText(h.analysis) ||
+              `Đã phân tích vai trò của "${sanitizeSummaryText(h.word)}" trong mạch cảm xúc và hình tượng thơ.`,
+          }))
+        : fallbackHighlights,
+      mainIdea: mainIdea || 'Chưa có kết luận nội dung chính rõ ràng từ phần tổng kết.',
     return {
       tone: base.tone || 'Chưa đủ dữ liệu giọng điệu (cần xác nhận rõ ở Bước 1).',
       rhythm: base.rhythm || (rhythmLines.length ? rhythmLines.join(' | ') : 'Chưa có nhịp thơ được xác nhận bằng [RHYTHM].'),
@@ -509,6 +549,8 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
       {
         x: 1370,
         y: 690,
+        title: 'Thông điệp & tiến trình học',
+        body: stepRecap.map((s) => `B${s.step} ${s.title}: ${s.details.join(' ')} Kết luận: ${s.note}`).join(' | '),
         title: '4 bước đã học',
         body: stepRecap.map((s) => `B${s.step} ${s.title}: ${s.status}. ${s.note}`).join(' | '),
         color: '#7c3aed',
@@ -1276,6 +1318,12 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                   Đang chuẩn bị phiên học: <span className="font-semibold">{poemTone}</span>
                 </div>
               </motion.div>
+            )}
+
+            {summaryBlockedReason && (
+              <div className="mx-auto max-w-2xl rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                {summaryBlockedReason}
+              </div>
             )}
 
             {isLoading && initStage === 'ready' && (
