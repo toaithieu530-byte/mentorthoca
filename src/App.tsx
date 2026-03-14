@@ -21,6 +21,10 @@ class AppErrorBoundary extends React.Component<React.PropsWithChildren, AppError
     };
     this.handleReset = this.handleReset.bind(this);
   }
+  state: AppErrorBoundaryState = {
+    hasError: false,
+    errorMessage: '',
+  };
 
   static getDerivedStateFromError(error: Error): AppErrorBoundaryState {
     return {
@@ -36,6 +40,9 @@ class AppErrorBoundary extends React.Component<React.PropsWithChildren, AppError
   handleReset() {
     this.setState({ hasError: false, errorMessage: '' });
   }
+  private handleReset = () => {
+    this.setState({ hasError: false, errorMessage: '' });
+  };
 
   render() {
     if (this.state.hasError) {

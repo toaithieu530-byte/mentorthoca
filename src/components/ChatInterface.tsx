@@ -409,6 +409,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
       const completed = getCompletedStepSet([...modelTexts, text]);
       const mentionsStep5 = /BƯỚC\s*5|TỔNG\s*KẾT/i.test(text);
       const canOpenSummary = completed.size >= 4 && (text.includes('[SUMMARY_MODE]') || mentionsStep5);
+      const canOpenSummary = text.includes('[SUMMARY_MODE]') || completed.size >= 3;
 
       if (!canOpenSummary) {
         setSummaryBlockedReason('Bạn và mình cần học đủ 4 bước trước khi mở màn hình tổng kết.');
@@ -439,6 +440,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
       }
 
       const cleanText = buildDisplayText(text);
+      const cleanText = stripRuntimeMarkup(text);
       setSummaryText(cleanText);
     }
   };
@@ -954,6 +956,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
           fullText += chunkText;
           
           const displayText = buildDisplayText(fullText);
+          const displayText = stripRuntimeMarkup(fullText);
           setMessages((prev) => prev.map(m => m.id === firstMessageId ? { ...m, text: displayText } : m));
           
           parseMarkup(fullText);
@@ -1001,6 +1004,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
 
     let fullText = '';
     const modelMessageId = (Date.now() + 1).toString();
+    let fullText = '';
     try {
       const responseStream = chatSession.sendMessageStream({ message: guidedMessage });
       
@@ -1016,6 +1020,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
         fullText += chunkText;
 
         const displayText = buildDisplayText(fullText);
+        const displayText = stripRuntimeMarkup(fullText);
         
         setMessages((prev) => prev.map(m => m.id === modelMessageId ? { ...m, text: displayText } : m));
         
@@ -1027,6 +1032,8 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
       if (fullText.trim()) {
         parseMarkup(fullText);
         setMessages((prev) => prev.map(m => m.id === modelMessageId ? { ...m, text: buildDisplayText(fullText) } : m));
+      if (fullText.includes('[SUMMARY_MODE]')) {
+        parseMarkup(fullText);
         setIsLoading(false);
         return;
       }
