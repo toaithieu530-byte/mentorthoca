@@ -105,6 +105,17 @@ interface Message {
   isAudioLoading?: boolean;
 }
 
+interface AudioTask {
+  text: string;
+  base64Audio?: string;
+  isFetching: boolean;
+  isReady: boolean;
+  isFailed: boolean;
+  puterPlay?: () => Promise<void>;
+  onStart?: () => void;
+  onEnd?: () => void;
+}
+
 
 interface SummaryData {
   tone: string;
@@ -150,6 +161,9 @@ const TEXT_API_ENDPOINTS = TEXT_API_BASE
     ? ['/api/chat', DEFAULT_TEXT_ENDPOINT]
     : [DEFAULT_TEXT_ENDPOINT, '/api/chat'];
 const TEXT_MODELS = ['openai', 'openai-large'];
+const ELEVENLABS_TTS_ENDPOINT = '/api/tts';
+const ELEVENLABS_VOICE_ID = (import.meta as any).env?.VITE_ELEVENLABS_VOICE_ID as string | undefined;
+const PUTER_ELEVENLABS_VOICE_ID = 'jdlxsPOZOHdGEfcItXVu';
 const USE_PUTER_GEMINI = (import.meta as any).env?.VITE_USE_PUTER_GEMINI !== 'false';
 const STEP_TITLES = [
   'Tri giác đoạn thơ',
@@ -159,6 +173,15 @@ const STEP_TITLES = [
 ];
 
 const safeText = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
+const sanitizeSummaryText = (value: unknown): string =>
+  safeText(value)
+    .replace(/\[RHYTHM:[^\]]*\]/gi, '')
+    .replace(/\[HIGHLIGHT:[^\]]*\]/gi, '')
+    .replace(/\[CLEAR_MARKUP\]/gi, '')
+    .replace(/\[SUMMARY_MODE\]/gi, '')
+    .replace(/```json[\s\S]*?```/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 const escapeXml = (value: string): string =>
   value
     .replace(/&/g, '&amp;')
@@ -166,6 +189,8 @@ const escapeXml = (value: string): string =>
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const normalizeSummaryData = (raw: Partial<SummaryData> | null | undefined): SummaryData | null => {
   if (!raw) return null;
@@ -198,6 +223,35 @@ const extractKeywords = (text: string, keywords: string[]): string[] => {
   return keywords.filter((keyword) => new RegExp(`\\b${keyword}\\b`, 'i').test(text));
 };
 
+const getCompletedStepSet = (texts: string[]): Set<number> => {
+  const completed = new Set<number>();
+  const joined = texts.join('\n').toUpperCase();
+  for (let step = 1; step <= 4; step++) {
+    const patterns = [
+      new RegExp(`###\\s*BƯỚC\\s*${step}`),
+      new RegExp(`BƯỚC\\s*${step}`),
+    ];
+    if (patterns.some((p) => p.test(joined))) {
+      completed.add(step);
+    }
+  }
+  return completed;
+};
+
+const stripRuntimeMarkup = (text: string): string =>
+  text
+    .replace(/\[SUMMARY_MODE\]/g, '')
+    .replace(/\[RHYTHM:.*?\]/g, '')
+    .replace(/\[HIGHLIGHT:.*?\]/g, '')
+    .replace(/\[CLEAR_MARKUP\]/g, '')
+    .replace(/```json[\s\S]*?```/g, '')
+    .trim();
+
+const stripPrematureStep5 = (text: string): string =>
+  text.replace(/(?:^|\n)\s*(?:[-_*\s]*)?BƯỚC\s*5\s*:[\s\S]*$/i, '').trim();
+
+const buildDisplayText = (text: string): string => stripPrematureStep5(stripRuntimeMarkup(text));
+
 
 export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -218,6 +272,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
   const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
   const [rhythmLines, setRhythmLines] = useState<string[]>([]);
   const [summaryBlockedReason, setSummaryBlockedReason] = useState<string | null>(null);
+  const [ttsError, setTtsError] = useState<string | null>(null);
   
   const initializedRef = useRef(false);
   const convoHistoryRef = useRef<PollinationsMessage[]>([]);
@@ -339,7 +394,6 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
     if (rhythmMatches.length > 0) {
       const lastRhythm = rhythmMatches[rhythmMatches.length - 1]?.[1] || '';
       const lines = lastRhythm.split(',').map((l) => l.trim()).filter(Boolean);
-      const lines = lastRhythm.split(',').map(l => l.trim()).filter(Boolean);
       setRhythmLines(lines);
     }
 
@@ -349,15 +403,12 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
       const words = lastHighlight.split(',').map((w) => w.trim()).filter(Boolean);
       setHighlights(words);
     }
-
-      const words = lastHighlight.split(',').map(w => w.trim()).filter(Boolean);
-      setHighlights(words);
-    }
     
     if (text.includes('[SUMMARY_MODE]')) {
       const modelTexts = messages.filter((m) => m.role === 'model').map((m) => m.text || '');
       const completed = getCompletedStepSet([...modelTexts, text]);
-      const canOpenSummary = completed.size >= 4;
+      const mentionsStep5 = /BƯỚC\s*5|TỔNG\s*KẾT/i.test(text);
+      const canOpenSummary = completed.size >= 4 && (text.includes('[SUMMARY_MODE]') || mentionsStep5);
 
       if (!canOpenSummary) {
         setSummaryBlockedReason('Bạn và mình cần học đủ 4 bước trước khi mở màn hình tổng kết.');
@@ -375,14 +426,19 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
         } catch (e) {
           console.error('Failed to parse summary JSON', e);
         }
+      } else {
+        const looseObjectMatch = text.match(/\{[\s\S]*\}/);
+        if (looseObjectMatch) {
+          try {
+            const parsed = JSON.parse(looseObjectMatch[0]);
+            setSummaryData(normalizeSummaryData(parsed));
+          } catch {
+            // keep summary mode even if JSON is malformed
+          }
+        }
       }
 
-      const cleanText = text
-        .replace(/\[SUMMARY_MODE\]/g, '')
-        .replace(/\[RHYTHM:.*?\]/g, '')
-        .replace(/\[HIGHLIGHT:.*?\]/g, '')
-        .replace(/```json[\s\S]*?```/g, '')
-        .trim();
+      const cleanText = buildDisplayText(text);
       setSummaryText(cleanText);
     }
   };
@@ -392,11 +448,6 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
     const fallbackHighlights = highlights.map((word) => ({
       word: sanitizeSummaryText(word),
       analysis: `Đã phân tích vai trò của "${sanitizeSummaryText(word)}" trong mạch cảm xúc và hình tượng thơ.`,
-
-  const effectiveSummaryData = useMemo<SummaryData>(() => {
-    const fallbackHighlights = highlights.map((word) => ({
-      word,
-      analysis: 'Tín hiệu thẩm mĩ đã được xác nhận trong quá trình thảo luận.',
     }));
 
     const base = normalizeSummaryData(summaryData) || {
@@ -427,15 +478,6 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
           }))
         : fallbackHighlights,
       mainIdea: mainIdea || 'Chưa có kết luận nội dung chính rõ ràng từ phần tổng kết.',
-    return {
-      tone: base.tone || 'Chưa đủ dữ liệu giọng điệu (cần xác nhận rõ ở Bước 1).',
-      rhythm: base.rhythm || (rhythmLines.length ? rhythmLines.join(' | ') : 'Chưa có nhịp thơ được xác nhận bằng [RHYTHM].'),
-      highlights: base.highlights.length ? base.highlights : fallbackHighlights,
-      mainIdea: base.mainIdea || inferredMainIdea || 'Chưa có kết luận nội dung chính rõ ràng từ phần tổng kết.',
-      tone: base.tone || 'Đã phân tích trong hội thoại',
-      rhythm: base.rhythm || (rhythmLines.length ? rhythmLines.join(' | ') : 'Đang cập nhật từ phần trao đổi'),
-      highlights: base.highlights.length ? base.highlights : fallbackHighlights,
-      mainIdea: base.mainIdea || inferredMainIdea || 'Đã tổng hợp từ 4 bước tìm và giải mã tín hiệu thẩm mĩ.',
     };
   }, [summaryData, highlights, rhythmLines, summaryText]);
 
@@ -501,13 +543,6 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
       }
 
       const hasEvidence = !details[0].startsWith('Chưa đủ dữ liệu');
-    const modelTexts = messages.filter((m) => m.role === 'model').map((m) => m.text);
-
-    return STEP_TITLES.map((title, index) => {
-      const step = index + 1;
-      const related = [...modelTexts].reverse().find((text) => new RegExp(`BƯỚC\s*${step}`, 'i').test(text));
-      const evaluationMatch = related?.match(/ĐÁNH GIÁ\s*[:：]\s*([^\n]+)/i);
-      const questionMatch = related?.match(/CÂU HỎI TRỌNG TÂM\s*[:：]\s*([^\n]+)/i);
 
       return {
         step,
@@ -521,11 +556,6 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
       };
     });
   }, [messages, rhythmLines, effectiveSummaryData, summaryText]);
-        status: related ? 'Đã thực hiện' : 'Chưa ghi nhận',
-        note: evaluationMatch?.[1]?.trim() || questionMatch?.[1]?.trim() || 'Đang chờ cập nhật từ hội thoại.',
-      };
-    });
-  }, [messages]);
 
   const downloadMindMap = () => {
     const width = 1600;
@@ -551,8 +581,6 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
         y: 690,
         title: 'Thông điệp & tiến trình học',
         body: stepRecap.map((s) => `B${s.step} ${s.title}: ${s.details.join(' ')} Kết luận: ${s.note}`).join(' | '),
-        title: '4 bước đã học',
-        body: stepRecap.map((s) => `B${s.step} ${s.title}: ${s.status}. ${s.note}`).join(' | '),
         color: '#7c3aed',
       },
     ];
@@ -658,7 +686,9 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
       if (highlights.length > 0) {
         highlights.forEach(word => {
           if (!word) return;
-          const regex = new RegExp(`(${word})`, 'gi');
+          const safeWord = escapeRegExp(word.trim());
+          if (!safeWord) return;
+          const regex = new RegExp(`(${safeWord})`, 'gi');
           lineElements = lineElements.flatMap(part => {
             if (typeof part === 'string') {
               const splits = part.split(regex);
@@ -715,6 +745,16 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
     const task: AudioTask = { text, isFetching: false, isReady: false, isFailed: false, onStart, onEnd };
     audioTasks.current.push(task);
     fetchNextAudio();
+  };
+
+  const replayPoemAudio = () => {
+    if (!poem?.trim()) return;
+    setTtsError(null);
+    addAudioTask(
+      poem,
+      () => setReadingPoemLine(-1),
+      () => setReadingPoemLine(null),
+    );
   };
 
 
@@ -877,11 +917,17 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
         setMessages([{
           id: 'system-reading',
           role: 'model',
-          text: '*Đang khởi tạo phiên học và phân tích đoạn thơ...*',
           text: '*Đang đọc đoạn thơ bằng giọng ElevenLabs (server/Puter)...*',
         }]);
 
         setReadingPoemLine(null);
+        setTtsError(null);
+
+        addAudioTask(
+          poem,
+          () => setReadingPoemLine(-1),
+          () => setReadingPoemLine(null),
+        );
 
         // 2. Start Chat
         setInitStage('ready');
@@ -903,7 +949,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
           const chunkText = chunk.text || '';
           fullText += chunkText;
           
-          const displayText = fullText.replace(/\[RHYTHM:.*?\]/g, '').replace(/\[HIGHLIGHT:.*?\]/g, '').replace(/\[CLEAR_MARKUP\]/g, '').trim();
+          const displayText = buildDisplayText(fullText);
           setMessages((prev) => prev.map(m => m.id === firstMessageId ? { ...m, text: displayText } : m));
           
           parseMarkup(fullText);
@@ -917,11 +963,14 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
         } else if (error?.message?.includes('Failed to fetch') || error?.message?.includes('NetworkError')) {
           errorMessage = 'Không thể kết nối tới máy chủ AI (có thể do chặn mạng/CORS ở môi trường deploy). Vui lòng kiểm tra mạng hoặc đổi endpoint TEXT_API.';
         }
-        setMessages([{
-          id: Date.now().toString(),
-          role: 'model',
-          text: errorMessage,
-        }]);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: Date.now().toString(),
+            role: 'model',
+            text: errorMessage,
+          },
+        ]);
       } finally {
         setIsLoading(false);
       }
@@ -941,9 +990,15 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
     ]);
     setIsLoading(true);
 
+    const modelTexts = messages.filter((m) => m.role === 'model').map((m) => m.text || '');
+    const completedSteps = getCompletedStepSet(modelTexts);
+    const nextStep = Math.min(4, Math.max(1, completedSteps.size + 1));
+    const guidedMessage = `${userMessage}\n\n[ĐIỀU HƯỚNG TỪ ỨNG DỤNG - BẮT BUỘC]\n- Chỉ phản hồi đúng BƯỚC ${nextStep}.\n- Không nhảy cóc bước.\n- Không chèn BƯỚC 5/TỔNG KẾT trước khi hoàn tất đủ 4 bước.`;
+
+    let fullText = '';
+    const modelMessageId = (Date.now() + 1).toString();
     try {
-      const responseStream = chatSession.sendMessageStream({ message: userMessage });
-      const modelMessageId = (Date.now() + 1).toString();
+      const responseStream = chatSession.sendMessageStream({ message: guidedMessage });
       
       setMessages((prev) => [
         ...prev,
@@ -952,13 +1007,11 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
       
       setIsLoading(false);
       
-      let fullText = '';
-      
       for await (const chunk of responseStream) {
         const chunkText = chunk.text || '';
         fullText += chunkText;
-        
-        const displayText = fullText.replace(/\[RHYTHM:.*?\]/g, '').replace(/\[HIGHLIGHT:.*?\]/g, '').replace(/\[CLEAR_MARKUP\]/g, '').trim();
+
+        const displayText = buildDisplayText(fullText);
         
         setMessages((prev) => prev.map(m => m.id === modelMessageId ? { ...m, text: displayText } : m));
         
@@ -967,6 +1020,12 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
       
     } catch (error: any) {
       console.error('Failed to send message:', error);
+      if (fullText.trim()) {
+        parseMarkup(fullText);
+        setMessages((prev) => prev.map(m => m.id === modelMessageId ? { ...m, text: buildDisplayText(fullText) } : m));
+        setIsLoading(false);
+        return;
+      }
       let errorMessage = 'Xin lỗi, tôi không thể trả lời lúc này. Vui lòng thử lại.';
       if (error?.status === 429 || error?.message?.includes('429') || error?.message?.includes('quota')) {
         errorMessage = 'Hệ thống đang quá tải hoặc hết hạn mức API. Vui lòng thử lại sau ít phút.';
@@ -992,7 +1051,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-[#f5f5f0] max-w-5xl mx-auto shadow-2xl overflow-hidden md:rounded-3xl md:h-[95vh] md:my-[2.5vh]">
+    <div className="flex flex-col min-h-dvh bg-[#f5f5f0] max-w-5xl mx-auto shadow-2xl overflow-hidden md:rounded-3xl md:h-[95vh] md:min-h-0 md:my-[2.5vh]">
       {/* Header */}
       <header className="bg-white px-6 py-4 border-b border-[#e0e0d8] flex items-center justify-between shrink-0 z-10">
         <div className="flex items-center gap-4">
@@ -1008,6 +1067,13 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={replayPoemAudio}
+            className="p-2 hover:bg-[#f5f5f0] rounded-full transition-colors text-[#5A5A40]"
+            title="Nghe lại đoạn thơ"
+          >
+            <Volume2 className="w-5 h-5" />
+          </button>
           <button 
             onClick={() => setShowMobilePoem(!showMobilePoem)}
             className="md:hidden p-2 hover:bg-[#f5f5f0] rounded-full transition-colors text-[#5A5A40]"
@@ -1074,7 +1140,6 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                       </div>
                       <h4 className="text-xs font-bold text-[#7A7A5A] uppercase tracking-[0.2em] mb-3">Giọng điệu</h4>
                       <p className="text-2xl font-serif text-[#2c2c28] leading-tight italic">
-                        {effectiveSummaryData.tone}
                         {effectiveSummaryData.tone || "Đang cập nhật..."}
                       </p>
                     </motion.div>
@@ -1090,7 +1155,6 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                       </div>
                       <h4 className="text-xs font-bold text-[#7A7A5A] uppercase tracking-[0.2em] mb-3">Nhịp thơ</h4>
                       <p className="text-2xl font-serif text-[#2c2c28] leading-tight italic">
-                        {effectiveSummaryData.rhythm}
                         {effectiveSummaryData.rhythm || "Đang cập nhật..."}
                       </p>
                     </motion.div>
@@ -1170,7 +1234,6 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                   <div className="relative z-10 max-w-3xl mx-auto text-center">
                     <h4 className="text-xs font-bold text-white/60 uppercase tracking-[0.3em] mb-6">Cảm hứng chủ đạo & Nội dung chính</h4>
                     <p className="text-2xl md:text-3xl font-serif leading-relaxed italic">
-                      "{effectiveSummaryData.mainIdea}"
                       "{effectiveSummaryData.mainIdea || "Đang tổng hợp nội dung..."}"
                     </p>
                   </div>
@@ -1323,6 +1386,12 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
             {summaryBlockedReason && (
               <div className="mx-auto max-w-2xl rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                 {summaryBlockedReason}
+              </div>
+            )}
+
+            {ttsError && (
+              <div className="mx-auto max-w-2xl rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 text-xs text-orange-700">
+                {ttsError}
               </div>
             )}
 
