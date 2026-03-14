@@ -30,13 +30,11 @@ const extractText = (response: any, shouldTrim = true): string => {
   }
 
   if (Array.isArray(response?.output)) {
-    return response.output
+    const combined = response.output
       .map((item: any) => item?.content || item?.text || '')
       .filter(Boolean)
       .join('\n');
     return normalize(combined);
-      .join('\n')
-      .trim();
   }
 
   return '';
