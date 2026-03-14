@@ -14,6 +14,9 @@ GIỌNG ĐIỆU & XƯNG HÔ (BẮT BUỘC):
 MỤC TIÊU PHẢN HỒI:
 - Luôn giúp học sinh tự nghĩ ra đáp án trước, không làm hộ ngay.
 - Luôn chấm mức độ đúng/sai/thiếu của câu trả lời học sinh một cách cân bằng.
+MỤC TIÊU PHẢN HỒI:
+- Luôn giúp học sinh tự nghĩ ra đáp án trước, không làm hộ ngay.
+- Luôn chấm mức độ đúng/sai/thiếu của câu trả lời học sinh.
 - Nếu học sinh sai hoặc thiếu: gợi ý tăng dần tối đa 3 lượt. Sau lượt thứ 3 vẫn chưa đạt thì mới đưa đáp án mẫu ngắn gọn.
 
 QUY TẮC BẮT BUỘC VỀ ĐỊNH DẠNG (mọi phản hồi):
@@ -366,6 +369,57 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
       }
     }
 
+    const rhythmMatches = Array.from(text.matchAll(/\[RHYTHM:\s*(.*?)\]/g));
+    if (rhythmMatches.length > 0) {
+      const lastRhythm = rhythmMatches[rhythmMatches.length - 1]?.[1] || '';
+      const lines = lastRhythm.split(',').map((l) => l.trim()).filter(Boolean);
+      const lines = lastRhythm.split(',').map(l => l.trim()).filter(Boolean);
+      setRhythmLines(lines);
+    }
+
+    const highlightMatches = Array.from(text.matchAll(/\[HIGHLIGHT:\s*(.*?)\]/g));
+    if (highlightMatches.length > 0) {
+      const lastHighlight = highlightMatches[highlightMatches.length - 1]?.[1] || '';
+      const words = lastHighlight.split(',').map((w) => w.trim()).filter(Boolean);
+      setHighlights(words);
+    }
+
+      const words = lastHighlight.split(',').map(w => w.trim()).filter(Boolean);
+      setHighlights(words);
+    }
+    
+    if (text.includes('[SUMMARY_MODE]')) {
+      const modelTexts = messages.filter((m) => m.role === 'model').map((m) => m.text || '');
+      const completed = getCompletedStepSet([...modelTexts, text]);
+      const canOpenSummary = completed.size >= 4;
+
+      if (!canOpenSummary) {
+        setSummaryBlockedReason('Bạn và mình cần học đủ 4 bước trước khi mở màn hình tổng kết.');
+        return;
+      }
+
+      setSummaryBlockedReason(null);
+      setIsSummaryMode(true);
+
+      const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
+      if (jsonMatch) {
+        try {
+          const parsed = JSON.parse(jsonMatch[1]);
+          setSummaryData(normalizeSummaryData(parsed));
+        } catch (e) {
+          console.error('Failed to parse summary JSON', e);
+        }
+      }
+
+      const cleanText = text
+        .replace(/\[SUMMARY_MODE\]/g, '')
+        .replace(/\[RHYTHM:.*?\]/g, '')
+        .replace(/\[HIGHLIGHT:.*?\]/g, '')
+        .replace(/```json[\s\S]*?```/g, '')
+        .trim();
+      setSummaryText(cleanText);
+    }
+
     const cleanText = text
       .replace(/\[SUMMARY_MODE\]/g, '')
       .replace(/\[RHYTHM:.*?\]/g, '')
@@ -592,6 +646,251 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
     URL.revokeObjectURL(url);
   };
 
+
+  const effectiveSummaryData = useMemo<SummaryData>(() => {
+    const fallbackHighlights = highlights.map((word) => ({
+      word: sanitizeSummaryText(word),
+      analysis: `Đã phân tích vai trò của "${sanitizeSummaryText(word)}" trong mạch cảm xúc và hình tượng thơ.`,
+
+  const effectiveSummaryData = useMemo<SummaryData>(() => {
+    const fallbackHighlights = highlights.map((word) => ({
+      word,
+      analysis: 'Tín hiệu thẩm mĩ đã được xác nhận trong quá trình thảo luận.',
+    }));
+
+    const base = normalizeSummaryData(summaryData) || {
+      tone: '',
+      rhythm: '',
+      highlights: [],
+      mainIdea: '',
+    };
+
+    const inferredMainIdea = summaryText
+      .split('\n')
+      .map((line) => line.trim())
+      .find((line) => line && !line.startsWith('###') && !line.startsWith('🔴') && !line.startsWith('ĐÁNH GIÁ')) || '';
+
+    const tone = sanitizeSummaryText(base.tone);
+    const rhythm = sanitizeSummaryText(base.rhythm || (rhythmLines.length ? rhythmLines.join(' / ') : ''));
+    const mainIdea = sanitizeSummaryText(base.mainIdea || inferredMainIdea);
+
+    return {
+      tone: tone || 'Chưa đủ dữ liệu giọng điệu (cần xác nhận rõ ở Bước 1).',
+      rhythm: rhythm || 'Chưa có nhịp thơ được xác nhận bằng [RHYTHM].',
+      highlights: base.highlights.length
+        ? base.highlights.map((h) => ({
+            word: sanitizeSummaryText(h.word),
+            analysis:
+              sanitizeSummaryText(h.analysis) ||
+              `Đã phân tích vai trò của "${sanitizeSummaryText(h.word)}" trong mạch cảm xúc và hình tượng thơ.`,
+          }))
+        : fallbackHighlights,
+      mainIdea: mainIdea || 'Chưa có kết luận nội dung chính rõ ràng từ phần tổng kết.',
+    return {
+      tone: base.tone || 'Chưa đủ dữ liệu giọng điệu (cần xác nhận rõ ở Bước 1).',
+      rhythm: base.rhythm || (rhythmLines.length ? rhythmLines.join(' | ') : 'Chưa có nhịp thơ được xác nhận bằng [RHYTHM].'),
+      highlights: base.highlights.length ? base.highlights : fallbackHighlights,
+      mainIdea: base.mainIdea || inferredMainIdea || 'Chưa có kết luận nội dung chính rõ ràng từ phần tổng kết.',
+      tone: base.tone || 'Đã phân tích trong hội thoại',
+      rhythm: base.rhythm || (rhythmLines.length ? rhythmLines.join(' | ') : 'Đang cập nhật từ phần trao đổi'),
+      highlights: base.highlights.length ? base.highlights : fallbackHighlights,
+      mainIdea: base.mainIdea || inferredMainIdea || 'Đã tổng hợp từ 4 bước tìm và giải mã tín hiệu thẩm mĩ.',
+    };
+  }, [summaryData, highlights, rhythmLines, summaryText]);
+
+  const stepRecap = useMemo<StepRecap[]>(() => {
+    const modelTexts = messages
+      .filter((m) => m.role === 'model')
+      .map((m) => m.text || '');
+
+    const findStepText = (stepNumber: number): string => {
+      const marker = `BƯỚC ${stepNumber}`;
+      const found = [...modelTexts].reverse().find((text) => text.toUpperCase().includes(marker));
+      return found || '';
+    };
+
+    return STEP_TITLES.map((title, index) => {
+      const step = index + 1;
+      const relatedText = findStepText(step);
+      const evaluationMatch = relatedText.match(/ĐÁNH GIÁ\s*[:：]\s*([^\n]+)/i);
+      const questionMatch = relatedText.match(/CÂU HỎI TRỌNG TÂM\s*[:：]\s*([^\n]+)/i);
+
+      let details: string[] = [];
+
+      if (step === 1) {
+        if (effectiveSummaryData.tone && !effectiveSummaryData.tone.startsWith('Chưa đủ dữ liệu')) {
+          details.push(`Đã nhận diện giọng điệu: ${effectiveSummaryData.tone}.`);
+        }
+        if (rhythmLines.length) {
+          details.push(`Đã xác nhận nhịp thơ: ${rhythmLines.slice(0, 2).join(' | ')}${rhythmLines.length > 2 ? ' ...' : ''}.`);
+        }
+      }
+
+      if (step === 2 && effectiveSummaryData.highlights.length) {
+        details.push(
+          `Đã tìm tín hiệu thẩm mĩ: ${effectiveSummaryData.highlights
+            .map((h) => h.word)
+            .slice(0, 6)
+            .join(', ')}${effectiveSummaryData.highlights.length > 6 ? ' ...' : ''}.`,
+        );
+        details.push('Đã làm nổi bật trực tiếp các từ/cụm từ trên văn bản thơ.');
+      }
+
+      if (step === 3) {
+        const categories = extractKeywords(
+          `${relatedText} ${summaryText}`,
+          ['ẩn dụ', 'so sánh', 'điệp', 'hoán dụ', 'đảo ngữ', 'nhịp', 'vần', 'cú pháp'],
+        );
+        if (categories.length) {
+          details.push(`Đã phân dạng tín hiệu theo nhóm: ${pickUnique(categories).join(', ')}.`);
+          details.push('Đã đối chiếu tín hiệu vào nhóm thể loại, từ ngữ, tu từ hoặc cú pháp.');
+        }
+      }
+
+      if (step === 4) {
+        const idea = effectiveSummaryData.mainIdea;
+        if (idea && !idea.startsWith('Chưa có kết luận')) {
+          details.push(`Đã giải mã ý nghĩa trung tâm: ${idea}.`);
+          details.push('Đã liên hệ hiệu quả nghệ thuật của tín hiệu với cảm xúc/chủ đề bài thơ.');
+        }
+      }
+
+      if (!details.length) {
+        details = ['Chưa đủ dữ liệu cụ thể; bạn có thể bổ sung thêm câu trả lời ở bước này để hoàn thiện bảng tổng kết.'];
+      }
+
+      const hasEvidence = !details[0].startsWith('Chưa đủ dữ liệu');
+    const modelTexts = messages.filter((m) => m.role === 'model').map((m) => m.text);
+
+    return STEP_TITLES.map((title, index) => {
+      const step = index + 1;
+      const related = [...modelTexts].reverse().find((text) => new RegExp(`BƯỚC\s*${step}`, 'i').test(text));
+      const evaluationMatch = related?.match(/ĐÁNH GIÁ\s*[:：]\s*([^\n]+)/i);
+      const questionMatch = related?.match(/CÂU HỎI TRỌNG TÂM\s*[:：]\s*([^\n]+)/i);
+
+      return {
+        step,
+        title,
+        status: hasEvidence ? 'Đã thực hiện' : 'Cần bổ sung',
+        note:
+          evaluationMatch?.[1]?.trim() ||
+          questionMatch?.[1]?.trim() ||
+          (hasEvidence ? 'Đã có bằng chứng từ quá trình học.' : 'Đang chờ cập nhật từ hội thoại.'),
+        details,
+      };
+    });
+  }, [messages, rhythmLines, effectiveSummaryData, summaryText]);
+        status: related ? 'Đã thực hiện' : 'Chưa ghi nhận',
+        note: evaluationMatch?.[1]?.trim() || questionMatch?.[1]?.trim() || 'Đang chờ cập nhật từ hội thoại.',
+      };
+    });
+  }, [messages]);
+
+  const downloadMindMap = () => {
+    const width = 1600;
+    const height = 1000;
+    const centerX = width / 2;
+    const centerY = 150;
+
+    const nodes = [
+      { x: centerX, y: centerY, title: `Tổng kết: ${author}`, body: effectiveSummaryData.mainIdea, color: '#5A5A40' },
+      { x: 230, y: 360, title: 'Giọng điệu', body: effectiveSummaryData.tone, color: '#2563eb' },
+      { x: 1370, y: 360, title: 'Nhịp thơ', body: effectiveSummaryData.rhythm, color: '#dc2626' },
+      {
+        x: 230,
+        y: 690,
+        title: 'Điểm sáng ngôn từ',
+        body: effectiveSummaryData.highlights.length
+          ? effectiveSummaryData.highlights.map((h) => `${h.word}: ${h.analysis}`).join(' | ')
+          : 'Chưa có điểm sáng được xác nhận.',
+        color: '#ca8a04',
+      },
+      {
+        x: 1370,
+        y: 690,
+        title: 'Thông điệp & tiến trình học',
+        body: stepRecap.map((s) => `B${s.step} ${s.title}: ${s.details.join(' ')} Kết luận: ${s.note}`).join(' | '),
+        title: '4 bước đã học',
+        body: stepRecap.map((s) => `B${s.step} ${s.title}: ${s.status}. ${s.note}`).join(' | '),
+        color: '#7c3aed',
+      },
+    ];
+
+    const wrap = (text: string, maxLen = 46): string[] => {
+      const words = text.split(/\s+/).filter(Boolean);
+      const lines: string[] = [];
+      let line = '';
+
+      for (const word of words) {
+        const candidate = line ? `${line} ${word}` : word;
+        if (candidate.length > maxLen) {
+          if (line) lines.push(line);
+          line = word;
+        } else {
+          line = candidate;
+        }
+      }
+      if (line) lines.push(line);
+      return lines.slice(0, 6);
+    };
+
+    const edges = [
+      [0, 1],
+      [0, 2],
+      [0, 3],
+      [0, 4],
+    ];
+
+    const edgeSvg = edges
+      .map(([a, b]) => {
+        const from = nodes[a];
+        const to = nodes[b];
+        return `<path d="M ${from.x} ${from.y + 70} C ${from.x} ${from.y + 200}, ${to.x} ${to.y - 200}, ${to.x} ${to.y - 70}" stroke="#cbd5e1" stroke-width="4" fill="none" />`;
+      })
+      .join('');
+
+    const nodeSvg = nodes
+      .map((node) => {
+        const lines = wrap(node.body);
+        const title = escapeXml(node.title);
+        const lineSvg = lines
+          .map((line, idx) => `<tspan x="${node.x}" dy="${idx === 0 ? 0 : 28}">${escapeXml(line)}</tspan>`)
+          .join('');
+
+        return `
+          <g>
+            <rect x="${node.x - 250}" y="${node.y - 80}" width="500" height="220" rx="28" fill="white" stroke="${node.color}" stroke-width="3" />
+            <text x="${node.x}" y="${node.y - 35}" text-anchor="middle" font-size="30" font-family="Georgia, serif" fill="${node.color}" font-weight="700">${title}</text>
+            <text x="${node.x}" y="${node.y + 5}" text-anchor="middle" font-size="24" font-family="Arial, sans-serif" fill="#334155">${lineSvg}</text>
+          </g>
+        `;
+      })
+      .join('');
+
+    const svg = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+        <defs>
+          <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+            <stop offset="0%" stop-color="#f8fafc" />
+            <stop offset="100%" stop-color="#eef2ff" />
+          </linearGradient>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#bg)" />
+        <text x="${width / 2}" y="60" text-anchor="middle" font-size="34" font-family="Georgia, serif" fill="#1e293b" font-weight="700">Sơ đồ tư duy bài học thẩm mĩ thơ ca</text>
+        ${edgeSvg}
+        ${nodeSvg}
+      </svg>
+    `;
+
+    const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `mindmap-${author.replace(/\s+/g, '-').toLowerCase() || 'tho-ca'}.svg`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const renderPoem = () => {
     let lines = poem.split('\n');
     
@@ -663,6 +962,168 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
     });
   };
 
+  const audioTasks = useRef<AudioTask[]>([]);
+  const isPlayingAudio = useRef(false);
+
+  const stopAllAudio = () => {
+    audioTasks.current = [];
+    isPlayingAudio.current = false;
+  };
+
+  const addAudioTask = (text: string, onStart?: () => void, onEnd?: () => void) => {
+    const task: AudioTask = { text, isFetching: false, isReady: false, isFailed: false, onStart, onEnd };
+    audioTasks.current.push(task);
+    fetchNextAudio();
+  };
+
+
+  const createPuterElevenLabsPlayer = async (text: string): Promise<(() => Promise<void>) | null> => {
+    const puter = (window as any).puter;
+    if (!puter?.ai?.txt2speech) return null;
+
+    const audioLike = await puter.ai.txt2speech(text, {
+      provider: 'elevenlabs',
+      voice: PUTER_ELEVENLABS_VOICE_ID,
+      model: 'eleven_multilingual_v2',
+      output_format: 'mp3_44100_128',
+    });
+
+    return async () => {
+      if (audioLike?.pause) {
+        try {
+          audioLike.currentTime = 0;
+        } catch {}
+      }
+
+      await new Promise<void>((resolve, reject) => {
+        if (!audioLike || typeof audioLike.play !== 'function') {
+          reject(new Error('Puter txt2speech returned unsupported audio object'));
+          return;
+        }
+
+        const cleanup = () => {
+          if (typeof audioLike.removeEventListener === 'function') {
+            audioLike.removeEventListener('ended', onEnded);
+            audioLike.removeEventListener('error', onError);
+          }
+        };
+
+        const onEnded = () => {
+          cleanup();
+          resolve();
+        };
+
+        const onError = () => {
+          cleanup();
+          reject(new Error('Puter ElevenLabs playback failed'));
+        };
+
+        if (typeof audioLike.addEventListener === 'function') {
+          audioLike.addEventListener('ended', onEnded);
+          audioLike.addEventListener('error', onError);
+        }
+
+        Promise.resolve(audioLike.play())
+          .then(() => {
+            if (typeof audioLike.addEventListener !== 'function') {
+              resolve();
+            }
+          })
+          .catch((error: any) => {
+            cleanup();
+            reject(error);
+          });
+      });
+    };
+  };
+
+  const fetchNextAudio = async () => {
+    const task = audioTasks.current.find(t => !t.isFetching && !t.isReady && !t.isFailed);
+    if (!task) return;
+
+    task.isFetching = true;
+    try {
+      const response = await fetch(ELEVENLABS_TTS_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: task.text, voiceId: ELEVENLABS_VOICE_ID }),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`ElevenLabs TTS failed (${response.status}): ${errText}`);
+      }
+
+      const buffer = await response.arrayBuffer();
+      let binary = '';
+      const bytes = new Uint8Array(buffer);
+      const chunkSize = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        binary += String.fromCharCode(...bytes.slice(i, i + chunkSize));
+      }
+      task.base64Audio = `data:audio/mpeg;base64,${btoa(binary)}`;
+      task.isReady = true;
+    } catch (error: any) {
+      console.warn('Server ElevenLabs TTS unavailable, trying Puter ElevenLabs:', error);
+      try {
+        const puterPlay = await createPuterElevenLabsPlayer(task.text);
+        if (!puterPlay) {
+          throw new Error('Puter ElevenLabs is unavailable in this browser');
+        }
+
+        task.puterPlay = puterPlay;
+        task.base64Audio = 'puter-elevenlabs';
+        task.isReady = true;
+        setTtsError(null);
+      } catch (puterError) {
+        console.warn('Puter ElevenLabs TTS unavailable:', puterError);
+        task.isFailed = true;
+        setTtsError('Không phát được audio: ElevenLabs server và Puter ElevenLabs đều đang lỗi.');
+      }
+    } finally {
+      task.isFetching = false;
+      playNextAudio();
+      fetchNextAudio();
+    }
+  };
+
+  const playNextAudio = async () => {
+    if (isPlayingAudio.current) return;
+    
+    const task = audioTasks.current[0];
+    if (!task) return;
+    
+    if (!task.isReady && !task.isFailed) return;
+    
+    audioTasks.current.shift();
+    
+    if (task.isReady && task.base64Audio) {
+      isPlayingAudio.current = true;
+      if (task.onStart) task.onStart();
+      try {
+        if (task.puterPlay) {
+          await task.puterPlay();
+        } else if (task.base64Audio.startsWith('data:audio/')) {
+          await new Promise<void>((resolve, reject) => {
+            const audio = new Audio(task.base64Audio);
+            audio.onended = () => resolve();
+            audio.onerror = () => reject(new Error('Failed to play ElevenLabs audio'));
+            audio.play().catch(reject);
+          });
+        }
+      } catch (e) {
+        console.error("Play error", e);
+      } finally {
+        if (task.onEnd) task.onEnd();
+        isPlayingAudio.current = false;
+        playNextAudio();
+      }
+    } else {
+      if (task.onEnd) task.onEnd();
+      playNextAudio();
+    }
+  };
+
   useEffect(() => {
     if (initializedRef.current) return;
     initializedRef.current = true;
@@ -676,6 +1137,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
           id: 'system-reading',
           role: 'model',
           text: '*Đang khởi tạo phiên học và phân tích đoạn thơ...*',
+          text: '*Đang đọc đoạn thơ bằng giọng ElevenLabs (server/Puter)...*',
         }]);
 
         setReadingPoemLine(null);
@@ -872,6 +1334,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                       <h4 className="text-xs font-bold text-[#7A7A5A] uppercase tracking-[0.2em] mb-3">Giọng điệu</h4>
                       <p className="text-2xl font-serif text-[#2c2c28] leading-tight italic">
                         {effectiveSummaryData.tone}
+                        {effectiveSummaryData.tone || "Đang cập nhật..."}
                       </p>
                     </motion.div>
 
@@ -887,6 +1350,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                       <h4 className="text-xs font-bold text-[#7A7A5A] uppercase tracking-[0.2em] mb-3">Nhịp thơ</h4>
                       <p className="text-2xl font-serif text-[#2c2c28] leading-tight italic">
                         {effectiveSummaryData.rhythm}
+                        {effectiveSummaryData.rhythm || "Đang cập nhật..."}
                       </p>
                     </motion.div>
                   </div>
@@ -966,6 +1430,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                     <h4 className="text-xs font-bold text-white/60 uppercase tracking-[0.3em] mb-6">Cảm hứng chủ đạo & Nội dung chính</h4>
                     <p className="text-2xl md:text-3xl font-serif leading-relaxed italic">
                       "{effectiveSummaryData.mainIdea}"
+                      "{effectiveSummaryData.mainIdea || "Đang tổng hợp nội dung..."}"
                     </p>
                   </div>
                 </motion.div>
@@ -1013,6 +1478,7 @@ export function ChatInterface({ poem, author, onBack }: ChatInterfaceProps) {
                             ))}
                           </ul>
                         </div>
+                        <p className="text-sm text-[#66664a] italic leading-relaxed">{item.note}</p>
                       </div>
                     ))}
                   </div>
